@@ -325,8 +325,28 @@ bool RedisDatabase::lset(const std::string &key, int index, const std::string &v
 bool RedisDatabase::hset(const std::string &key, const std::string &field, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    hash_store[key][field] = value;
-    return true;
+    // 1. 查找外层 key
+    auto keyIt = hash_store.find(key);
+
+    // 2. 如果 key 不存在，创建 Hash 和 field
+    if (keyIt == hash_store.end())
+    {
+        hash_store[key][field] = value;
+        return true;
+    }
+    // 3. key 存在，查找内部 field
+    auto fieldIt = keyIt->second.find(field);
+
+    // 4. field 不存在，新增字段
+    if (fieldIt == keyIt->second.end())
+    {
+        keyIt->second.emplace(field, value);
+        return true;
+    }
+    // 5. field 已存在，只更新 value
+    fieldIt->second = value;
+
+    return false; // 表示没有新增field ，不是修改失败；
 }
 
 bool RedisDatabase::hget(const std::string &key, const std::string &field, std::string &value)
@@ -365,10 +385,30 @@ bool RedisDatabase::hdel(const std::string &key, const std::string &field)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
 
-    auto it = hash_store.find(key);
-    if (it != hash_store.end())
-        return hash_store.erase(field) > 0;
-    return false;
+    auto keyIt = hash_store.find(key);
+
+    if (keyIt == hash_store.end())
+        return false;
+
+    auto fieldIt = keyIt->second.find(field);
+    if (fieldIt == keyIt->second.end())
+        return false;
+
+    keyIt->second.erase(field);
+
+    if (keyIt->second.empty())
+    {
+        hash_store.erase(keyIt);
+
+        bool keyStillExists =
+            kv_store.find(key) != kv_store.end() ||
+            list_store.find(key) != list_store.end() ||
+            hash_store.find(key) != hash_store.end();
+
+        if (!keyStillExists)
+            expiry_map.erase(key);
+    }
+    return true;
 }
 
 std::unordered_map<std::string, std::string> RedisDatabase::hgetall(const std::string &key)

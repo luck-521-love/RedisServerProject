@@ -321,8 +321,8 @@ static std::string handleHgetall(const std::vector<std::string> &tokens, RedisDa
     for (const auto &pair : hash)
     {
         oss << "$" << pair.first.size() << "\r\n"
-            << pair.first << " \r\n";
-        oss << "$" << pair.second.size() << "\r\n"
+            << pair.first << "\r\n"
+            << "$" << pair.second.size() << "\r\n"
             << pair.second << "\r\n";
     }
     return oss.str();

@@ -281,8 +281,8 @@ static std::string handleHset(const std::vector<std::string> &tokens, RedisDatab
 {
     if (tokens.size() < 4)
         return "-Error: HSET requires key, field and value\r\n";
-    db.hset(tokens[1], tokens[2], tokens[3]);
-    return ":1\r\n";
+    bool added = db.hset(tokens[1], tokens[2], tokens[3]);
+    return ":" + std::to_string(added ? 1 : 0) + "\r\n";
 }
 
 static std::string handleHget(const std::vector<std::string> &tokens, RedisDatabase &db)
@@ -367,10 +367,10 @@ static std::string handleHlen(const std::vector<std::string> &tokens, RedisDatab
 
 static std::string handleHmset(const std::vector<std::string> &tokens, RedisDatabase &db)
 {
-    if (tokens.size() < 4 || (tokens.size() % 4 == 1))
+    if (tokens.size() < 4 || ((tokens.size() - 2) % 2 != 0))
         return "-Error: HMSET requires key followed by field value pairs\r\n";
     std::vector<std::pair<std::string, std::string>> fieldValues;
-    for (size_t i = 0; i < tokens.size(); ++i)
+    for (size_t i = 2; i + 1 < tokens.size(); i += 2)
     {
         fieldValues.emplace_back(tokens[i], tokens[i + 1]);
     }

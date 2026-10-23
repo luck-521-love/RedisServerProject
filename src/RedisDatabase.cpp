@@ -513,8 +513,8 @@ bool RedisDatabase::load(const std::string &filename)
     std::string Line;
     while (getline(ifs, Line))
     {
-        std::istringstream iss;
-        char type;
+        std::istringstream iss(Line);
+        char type = ' ';
         iss >> type;
         if (type == 'K')
         {

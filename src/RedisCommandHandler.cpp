@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <exception>
 #include <iostream> // debug
+#include <climits>
 
 // RESP parser:
 // *2\r\n$4\r\n\PING\r\n$4\r\nTEST\r\n
@@ -14,6 +15,25 @@
 // PING
 // TEST
 
+static bool parse_uint(const std::string &s, int &out)
+{
+    if (s.empty())
+        return false;
+    int value = 0;
+    int d = 0;
+    for (char it : s)
+    {
+        if (it < '0' || it > '9')
+            return false;
+        d = it - '0';
+        if (value > (INT_MAX - d) / 10)
+            return false;
+        value = value * 10 + d;
+    }
+
+    out = value;
+    return true;
+}
 std::vector<std::string> parseRespCommand(const std::string &input)
 {
     std::vector<std::string> tokens;
@@ -39,7 +59,10 @@ std::vector<std::string> parseRespCommand(const std::string &input)
     if (crlf == std::string::npos)
         return tokens;
 
-    int numElements = std::stoi(input.substr(pos, crlf - pos));
+    int numElements = 0;
+    if (!parse_uint(input.substr(pos, crlf - pos), numElements))
+        return tokens;
+
     pos = crlf + 2;
 
     for (int i = 0; i < numElements; i++)
@@ -51,10 +74,12 @@ std::vector<std::string> parseRespCommand(const std::string &input)
         crlf = input.find("\r\n", pos);
         if (crlf == std::string::npos)
             break;
-        int len = std::stoi(input.substr(pos, crlf - 2));
+        int len = 0;
+        if (!parse_uint(input.substr(pos, crlf - pos), len))
+            break;
         pos = crlf + 2;
 
-        if (pos + len > input.size())
+        if (pos + len + 2 > input.size())
             break;
         std::string token = input.substr(pos, len);
         tokens.push_back(token);
@@ -80,7 +105,7 @@ static std::string handleFlushAll(const std::vector<std::string> & /*tokens*/, R
     db.flushAll();
     return "+OK\r\n";
 }
-
+// KV  Opreations
 static std::string handleSet(const std::vector<std::string> &tokens, RedisDatabase &db)
 {
     if (tokens.size() < 3)
@@ -152,7 +177,7 @@ static std::string handleRename(const std::vector<std::string> &tokens, RedisDat
     return "-Error: Key not found or rename failed\r\n";
 }
 
-// List Opreations
+// List  Opreations
 
 static std::string handleLget(const std::vector<std::string> &tokens, RedisDatabase &db)
 {
@@ -275,7 +300,7 @@ static std::string handleLset(const std::vector<std::string> &tokens, RedisDatab
     }
 }
 
-// Hash Operations
+// Hash  Opreations
 
 static std::string handleHset(const std::vector<std::string> &tokens, RedisDatabase &db)
 {
@@ -314,7 +339,7 @@ static std::string handleHdel(const std::vector<std::string> &tokens, RedisDatab
 static std::string handleHgetall(const std::vector<std::string> &tokens, RedisDatabase &db)
 {
     if (tokens.size() < 2)
-        return "-Error: HGETTALL requires key\r\n";
+        return "-Error: HGETALL requires key\r\n";
     auto hash = db.hgetall(tokens[1]);
     std::ostringstream oss;
     oss << "*" << hash.size() * 2 << "\r\n";

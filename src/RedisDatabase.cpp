@@ -18,6 +18,7 @@ bool RedisDatabase::flushAll()
     kv_store.clear();
     list_store.clear();
     hash_store.clear();
+    expiry_map.clear();
     return true;
 }
 // Key/Value Operations

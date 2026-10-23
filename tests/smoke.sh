@@ -73,6 +73,13 @@ print(data.hex())
 PY
 )
 assert_eq "HGETALL 原始字节" "2a320d0a24340d0a6e616d650d0a24330d0a426f620d0a" "$RAW"
+# FLUSHALL 必须清掉旧 TTL，不能误删新 key
+assert_eq "SET t v" "OK" "$(cli SET t v)"
+assert_eq "EXPIRE t 1" "OK" "$(cli EXPIRE t 1)"
+assert_eq "FLUSHALL" "OK" "$(cli FLUSHALL)"
+assert_eq "SET t new" "OK" "$(cli SET t new)"
+sleep 2
+assert_eq "FLUSHALL 清除旧 TTL 后新 key 存活" "new" "$(cli GET t)"
 
 echo
 echo "== 结果：PASS=$PASS FAIL=$FAIL =="

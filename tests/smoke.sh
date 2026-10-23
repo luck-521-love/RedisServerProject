@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# tests/smoke.sh —— 带断言的集成测试
+set -u
+
+PORT=6378
+SERVER="$HOME/RedisServer/my_redis_server"
+WORK=/tmp/redis-test-run
+
+PASS=0
+FAIL=0
+
+pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
+
+fail() {
+  echo "FAIL: $1"
+  echo "      期望: [$2]"
+  echo "      实际: [$3]"
+  FAIL=$((FAIL + 1))
+}
+
+assert_eq() {
+  local name="$1"
+  local expected="$2"
+  local actual="$3"
+  if [ "$expected" = "$actual" ]; then
+    pass "$name"
+  else
+    fail "$name" "$expected" "$actual"
+  fi
+}
+
+echo "== 1. 清理旧进程 =="
+pkill -f "my_redis_server $PORT" 2>/dev/null
+sleep 0.3
+rm -rf "$WORK"
+mkdir -p "$WORK"
+
+echo "== 2. 启动服务器 =="
+cd "$WORK"
+"$SERVER" "$PORT" > server.log 2>&1 &
+SRV=$!
+trap 'kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null' EXIT
+
+for i in $(seq 1 20); do
+  redis-cli -p "$PORT" PING >/dev/null 2>&1 && break
+  sleep 0.1
+done
+
+cli() { redis-cli -p "$PORT" --raw "$@"; }
+
+echo "== 3. 测试 =="
+assert_eq "PING" "PONG" "$(cli PING)"
+
+assert_eq "HSET 新字段返回 1" "1" "$(cli HSET test:1 name Alice)"
+assert_eq "HSET 覆盖返回 0" "0" "$(cli HSET test:1 name Bob)"
+assert_eq "HGET 返回最新值" "Bob" "$(cli HGET test:1 name)"
+
+assert_eq "HMSET 两个 pair" "OK" "$(cli HMSET hm a 1 b 2)"
+assert_eq "HLEN 为 2" "2" "$(cli HLEN hm)"
+assert_eq "HGET hm b" "2" "$(cli HGET hm b)"
+
+assert_eq "HGETALL 不存在的 key 为空" "" "$(cli HGETALL no-such-key)"
+
+RAW=$(python3 - "$PORT" <<'PY'
+import socket, sys
+
+port = int(sys.argv[1])
+s = socket.create_connection(("127.0.0.1", port), timeout=2)
+s.sendall(b"*2\r\n$7\r\nHGETALL\r\n$6\r\ntest:1\r\n")
+data = s.recv(4096)
+s.close()
+print(data.hex())
+PY
+)
+assert_eq "HGETALL 原始字节" "2a320d0a24340d0a6e616d650d0a24330d0a426f620d0a" "$RAW"
+
+echo
+echo "== 结果：PASS=$PASS FAIL=$FAIL =="
+[ "$FAIL" -eq 0 ] || exit 1

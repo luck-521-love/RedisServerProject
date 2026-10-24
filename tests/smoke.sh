@@ -75,7 +75,7 @@ PY
 assert_eq "HGETALL 原始字节" "2a320d0a24340d0a6e616d650d0a24330d0a426f620d0a" "$RAW"
 # FLUSHALL 必须清掉旧 TTL，不能误删新 key
 assert_eq "SET t v" "OK" "$(cli SET t v)"
-assert_eq "EXPIRE t 1" "OK" "$(cli EXPIRE t 1)"
+assert_eq "EXPIRE t 1" "1" "$(cli EXPIRE t 1)"
 assert_eq "FLUSHALL" "OK" "$(cli FLUSHALL)"
 assert_eq "SET t new" "OK" "$(cli SET t new)"
 sleep 2
@@ -84,8 +84,8 @@ assert_eq "FLUSHALL 清除旧 TTL 后新 key 存活" "new" "$(cli GET t)"
 # 过期 hash / list 的读取必须视为不存在
 assert_eq "准备过期 hash" "1" "$(cli HSET h3 f v)"
 assert_eq "准备过期 list" "3" "$(cli RPUSH l3 a b c)"
-assert_eq "EXPIRE h3" "OK" "$(cli EXPIRE h3 1)"
-assert_eq "EXPIRE l3" "OK" "$(cli EXPIRE l3 1)"
+assert_eq "EXPIRE h3" "1" "$(cli EXPIRE h3 1)"
+assert_eq "EXPIRE l3" "1" "$(cli EXPIRE l3 1)"
 sleep 2
 assert_eq "过期 HGET 返回空" "" "$(cli HGET h3 f)"
 assert_eq "过期 HLEN 返回 0" "0" "$(cli HLEN h3)"
@@ -97,6 +97,27 @@ assert_eq "过期 TYPE 返回 none" "none" "$(cli TYPE h3)"
 assert_eq "无 TTL HSET" "1" "$(cli HSET h4 f v)"
 assert_eq "无 TTL HGET" "v" "$(cli HGET h4 f)"
 
+# TTL / PTTL / PERSIST 语义
+assert_eq "TTL 不存在的 key" "-2" "$(cli TTL no-such-key)"
+assert_eq "SET ttl:one v" "OK" "$(cli SET ttl:one v)"
+assert_eq "无 TTL 时 TTL" "-1" "$(cli TTL ttl:one)"
+assert_eq "EXPIRE ttl:one 100" "1" "$(cli EXPIRE ttl:one 100)"
+assert_eq "TTL 约 100 秒" "100" "$(cli TTL ttl:one)"
+assert_eq "PERSIST 移除 TTL" "1" "$(cli PERSIST ttl:one)"
+assert_eq "PERSIST 后 TTL" "-1" "$(cli TTL ttl:one)"
+assert_eq "PERSIST 后 PTTL" "-1" "$(cli PTTL ttl:one)"
+assert_eq "再次 PERSIST" "0" "$(cli PERSIST ttl:one)"
+assert_eq "PTTL 不存在的 key" "-2" "$(cli PTTL no-such-key)"
+assert_eq "EXPIRE 不存在的 key" "0" "$(cli EXPIRE no-such-key 10)"
+assert_eq "SET ttl:two v" "OK" "$(cli SET ttl:two v)"
+assert_eq "EXPIRE ttl:two 0" "1" "$(cli EXPIRE ttl:two 0)"
+assert_eq "EXPIRE 0 后 key 删除" "" "$(cli GET ttl:two)"
+assert_eq "SET ttl:three v" "OK" "$(cli SET ttl:three v)"
+assert_eq "EXPIRE ttl:three 1" "1" "$(cli EXPIRE ttl:three 1)"
+assert_eq "SET ttl:three new" "OK" "$(cli SET ttl:three new)"
+sleep 2
+assert_eq "旧 TTL 不影响 SET 后的新值" "new" "$(cli GET ttl:three)"
+
 echo
 echo "== 结果：PASS=$PASS FAIL=$FAIL =="
-[ "$FAIL" -eq 0 ] || exit 1
+[ "$FAIL" -eq 0 ] || exit 1 

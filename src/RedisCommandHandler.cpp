@@ -105,6 +105,31 @@ static std::string handleFlushAll(const std::vector<std::string> & /*tokens*/, R
     db.flushAll();
     return "+OK\r\n";
 }
+
+static std::string handleTtl(const std::vector<std::string> &tokens, RedisDatabase &db)
+{
+    if (tokens.size() < 2)
+        return "-Error: TTL requires key\r\n";
+    auto v = db.ttl(tokens[1]);
+    return ":" + std::to_string(v) + "\r\n";
+}
+static std::string handlePttl(const std::vector<std::string> &tokens, RedisDatabase &db)
+{
+    if (tokens.size() < 2)
+        return "-Error: PTTL requires key\r\n";
+    auto v = db.pttl(tokens[1]);
+    return ":" + std::to_string(v) + "\r\n";
+}
+
+static std::string handlePersist(const std::vector<std::string> &tokens, RedisDatabase &db)
+{
+    if (tokens.size() < 2)
+        return "-Error: PERSIST requires key\r\n";
+    bool removed = db.persist(tokens[1]);
+
+    return ":" + std::to_string((removed ? 1 : 0)) + "\r\n";
+}
+
 // KV  Opreations
 static std::string handleSet(const std::vector<std::string> &tokens, RedisDatabase &db)
 {
@@ -158,9 +183,9 @@ static std::string handleExpire(const std::vector<std::string> &tokens, RedisDat
     {
         int seconds = std::stoi(tokens[2]);
         if (db.expire(tokens[1], seconds))
-            return "+OK\r\n";
+            return ":1\r\n";
         else
-            return "-Error: Key not found\r\n";
+            return ":0\r\n";
     }
     catch (const std::exception &)
     {
@@ -422,6 +447,12 @@ std::string RedisCommandHandler::processCommand(const std::string &commandLine)
         return handleEcho(tokens, db);
     else if (cmd == "FLUSHALL")
         return handleFlushAll(tokens, db);
+    else if (cmd == "TTL")
+        return handleTtl(tokens, db);
+    else if (cmd == "PTTL")
+        return handlePttl(tokens, db);
+    else if (cmd == "PERSIST")
+        return handlePersist(tokens, db);
     else if (cmd == "SET")
         return handleSet(tokens, db);
     else if (cmd == "GET")

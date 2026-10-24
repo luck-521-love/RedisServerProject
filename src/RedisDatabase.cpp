@@ -36,10 +36,71 @@ bool RedisDatabase::flushAll()
     expiry_map.clear();
     return true;
 }
+
+long long RedisDatabase::ttl(const std::string &key)
+{
+    std::lock_guard<std::mutex> lock(db_mutex); //  必须加锁
+
+    if (removeIfExpired(key)) // 已过期 = 不存在
+        return -2;
+
+    auto it = expiry_map.find(key); // 没有 TTL 记录
+    if (it == expiry_map.end())
+    {
+        bool exists = kv_store.count(key) ||
+                      list_store.count(key) ||
+                      hash_store.count(key);
+        return exists ? -1 : -2;
+    }
+
+    auto now = std::chrono::steady_clock::now(); // 算剩余
+    auto remain = it->second - now;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(remain).count();
+
+    return (ms + 500) / 1000; // 四舍五入到秒
+}
+
+long long RedisDatabase::pttl(const std::string &key)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return -2;
+
+    auto it = expiry_map.find(key); // 没有 TTL 记录
+    if (it == expiry_map.end())
+    {
+        bool exists = kv_store.count(key) ||
+                      list_store.count(key) ||
+                      hash_store.count(key);
+        return exists ? -1 : -2;
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    auto remain = it->second - now;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(remain).count();
+    return ms;
+}
+
+bool RedisDatabase::persist(const std::string &key)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+
+    if (removeIfExpired(key))
+        return false;
+
+    auto it = expiry_map.find(key);
+
+    if (it == expiry_map.end())
+        return false;
+    expiry_map.erase(it);
+    return true;
+}
 // Key/Value Operations
 void RedisDatabase::set(const std::string &key, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    removeIfExpired(key);  // 清理过期残留数据
+    expiry_map.erase(key); // 清除旧的TTL (不管有没有)
     kv_store[key] = value;
     return;
 }
@@ -116,13 +177,19 @@ bool RedisDatabase::del(const std::string &key)
 bool RedisDatabase::expire(const std::string &key, int second)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    purgeExpired();
-
-    bool exists = ((kv_store.find(key) != kv_store.end()) || (list_store.find(key) != list_store.end()) || (hash_store.find(key) != hash_store.end()));
-
-    if (!exists)
+    if (removeIfExpired(key))
+        return false;
+    if ((kv_store.find(key) == kv_store.end()) && (list_store.find(key) == list_store.end()) && (hash_store.find(key) == hash_store.end()))
         return false;
 
+    if (second <= 0)
+    {
+        kv_store.erase(key);
+        list_store.erase(key);
+        hash_store.erase(key);
+        expiry_map.erase(key);
+        return true;
+    }
     expiry_map[key] = std::chrono::steady_clock::now() + std::chrono::seconds(second);
     return true;
 }

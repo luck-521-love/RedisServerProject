@@ -15,6 +15,9 @@ public:
     // Common Comands
     bool flushAll();
 
+    long long ttl(const std::string &key);  // 秒：-2 不存在；-1 无 TTL；否则剩余秒数（四舍五入）
+    long long pttl(const std::string &key); // 毫秒：-2 / -1 / 剩余毫秒
+    bool persist(const std::string &key);   // 有 TTL 并移除 → true；否则 false
     // Key/Value Operations
     void set(const std::string &key, const std::string &value);
     bool get(const std::string &key, std::string &value);

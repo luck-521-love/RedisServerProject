@@ -57,7 +57,7 @@ private:
     RedisDatabase(const RedisDatabase &) = delete;
     RedisDatabase &operator=(const RedisDatabase) = delete;
 
-    // 调用者必须已持有 db_mutex
+    // 调用者必须已持有 db_mutex,RedisDatabase内部辅助函数
     bool removeIfExpired(const std::string &key);
 
     std::mutex db_mutex;

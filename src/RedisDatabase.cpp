@@ -12,6 +12,7 @@ RedisDatabase &RedisDatabase::getInstance()
     return instance;
 }
 
+// 如果已过期则删除
 bool RedisDatabase::removeIfExpired(const std::string &key)
 {
     auto expireIt = expiry_map.find(key);

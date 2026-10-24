@@ -12,6 +12,20 @@ RedisDatabase &RedisDatabase::getInstance()
     return instance;
 }
 
+bool RedisDatabase::removeIfExpired(const std::string &key)
+{
+    auto expireIt = expiry_map.find(key);
+    if (expireIt == expiry_map.end())
+        return false;
+    if (std::chrono::steady_clock::now() < expireIt->second)
+        return false;
+    kv_store.erase(key);
+    list_store.erase(key);
+    hash_store.erase(key);
+    expiry_map.erase(expireIt);
+    return true;
+}
+
 bool RedisDatabase::flushAll()
 {
     std::lock_guard<std::mutex> lock(db_mutex);
@@ -67,6 +81,8 @@ std::vector<std::string> RedisDatabase::keys()
 std::string RedisDatabase::type(const std::string &key)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return "none";
     if (kv_store.find(key) != kv_store.end())
     {
         return "string";
@@ -170,6 +186,8 @@ bool RedisDatabase::rename(const std::string &oldKey, const std::string &newKey)
 std::vector<std::string> RedisDatabase::lget(const std::string &key)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return {};
     auto it = list_store.find(key);
     if (it != list_store.end())
     {
@@ -181,6 +199,8 @@ std::vector<std::string> RedisDatabase::lget(const std::string &key)
 ssize_t RedisDatabase::llen(const std::string &key)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return 0;
     if (list_store.find(key) != list_store.end())
         return list_store.find(key)->second.size();
     return 0;
@@ -289,6 +309,8 @@ int RedisDatabase::lrem(const std::string &key, int count, const std::string &va
 bool RedisDatabase::lindex(const std::string &key, int index, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return false;
     auto it = list_store.find(key);
 
     if (it == list_store.end())
@@ -353,7 +375,8 @@ bool RedisDatabase::hset(const std::string &key, const std::string &field, const
 bool RedisDatabase::hget(const std::string &key, const std::string &field, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-
+    if (removeIfExpired(key))
+        return false;
     auto it = hash_store.find(key);
 
     if (it != hash_store.end())
@@ -371,6 +394,8 @@ bool RedisDatabase::hget(const std::string &key, const std::string &field, std::
 bool RedisDatabase::hexists(const std::string &key, const std::string &field)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return false;
     auto it = hash_store.find(key);
 
     if (it != hash_store.end())
@@ -415,6 +440,8 @@ bool RedisDatabase::hdel(const std::string &key, const std::string &field)
 std::unordered_map<std::string, std::string> RedisDatabase::hgetall(const std::string &key)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return {};
     auto it = hash_store.find(key);
     if (it != hash_store.end())
         return hash_store[key];
@@ -424,6 +451,8 @@ std::unordered_map<std::string, std::string> RedisDatabase::hgetall(const std::s
 std::vector<std::string> RedisDatabase::hkeys(const std::string &key)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return {};
     std::vector<std::string> fields;
     auto it = hash_store.find(key);
     if (it != hash_store.end())
@@ -437,6 +466,8 @@ std::vector<std::string> RedisDatabase::hkeys(const std::string &key)
 std::vector<std::string> RedisDatabase::hvals(const std::string &key)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return {};
     std::vector<std::string> values;
 
     auto it = hash_store.find(key);
@@ -450,8 +481,9 @@ std::vector<std::string> RedisDatabase::hvals(const std::string &key)
 
 ssize_t RedisDatabase::hlen(const std::string &key)
 {
-
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (removeIfExpired(key))
+        return 0;
     auto it = hash_store.find(key);
     if (it != hash_store.end())
         return it->second.size();

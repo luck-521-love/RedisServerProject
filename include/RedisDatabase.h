@@ -57,6 +57,9 @@ private:
     RedisDatabase(const RedisDatabase &) = delete;
     RedisDatabase &operator=(const RedisDatabase) = delete;
 
+    // 调用者必须已持有 db_mutex
+    bool removeIfExpired(const std::string &key);
+
     std::mutex db_mutex;
     std::unordered_map<std::string, std::string> kv_store;
     std::unordered_map<std::string, std::vector<std::string>> list_store;

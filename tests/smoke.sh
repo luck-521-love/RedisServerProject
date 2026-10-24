@@ -81,6 +81,22 @@ assert_eq "SET t new" "OK" "$(cli SET t new)"
 sleep 2
 assert_eq "FLUSHALL 清除旧 TTL 后新 key 存活" "new" "$(cli GET t)"
 
+# 过期 hash / list 的读取必须视为不存在
+assert_eq "准备过期 hash" "1" "$(cli HSET h3 f v)"
+assert_eq "准备过期 list" "3" "$(cli RPUSH l3 a b c)"
+assert_eq "EXPIRE h3" "OK" "$(cli EXPIRE h3 1)"
+assert_eq "EXPIRE l3" "OK" "$(cli EXPIRE l3 1)"
+sleep 2
+assert_eq "过期 HGET 返回空" "" "$(cli HGET h3 f)"
+assert_eq "过期 HLEN 返回 0" "0" "$(cli HLEN h3)"
+assert_eq "过期 LGET 返回空" "" "$(cli LGET l3)"
+assert_eq "过期 LLEN 返回 0" "0" "$(cli LLEN l3)"
+assert_eq "过期 TYPE 返回 none" "none" "$(cli TYPE h3)"
+
+# 没设 TTL 的数据必须正常
+assert_eq "无 TTL HSET" "1" "$(cli HSET h4 f v)"
+assert_eq "无 TTL HGET" "v" "$(cli HGET h4 f)"
+
 echo
 echo "== 结果：PASS=$PASS FAIL=$FAIL =="
 [ "$FAIL" -eq 0 ] || exit 1

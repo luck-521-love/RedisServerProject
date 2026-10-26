@@ -10,6 +10,7 @@ namespace
     constexpr size_t kMaxBulkLen = 16 * 1024 * 1024; // 单条 bulk 上限 16MB
     constexpr size_t kMaxLineLen = 64;               // 头部数字行上限
     constexpr int kMaxArgs = 1024 * 1024;            // 单条命令参数个数上限
+    constexpr size_t kMaxInlineLen = 64 * 1024;      // inline 命令上限 64KB
 
     size_t findCRLF(const char *data, size_t start, size_t len)
     {
@@ -51,7 +52,7 @@ ParseResult RespParser::parseNext(const Buffer &buf)
     size_t len = buf.readAble();
 
     if (data[0] != '*')
-        return {ParseStatus::NeedMore}; // inline 命令下一步再做
+        return ParseInline(data, len); // inline 命令下一步再做
 
     return ParseMultibulk(data, len);
 }
@@ -108,4 +109,36 @@ ParseResult RespParser::ParseMultibulk(const char *data, size_t len)
     }
 
     return {ParseStatus::OK, std::move(args), pos};
+}
+
+ParseResult RespParser::ParseInline(const char *data, size_t len)
+{
+    size_t crlf = findCRLF(data, 0, len);
+    if (crlf == len)
+    {
+        if (len > kMaxInlineLen)
+            return {ParseStatus::Error, {}, 0};
+        return {ParseStatus::NeedMore, {}, 0};
+    }
+
+    std::vector<std::string> args;
+    size_t start = 0;
+    while (start < len)
+    {
+        while (start < crlf && data[start] == ' ')
+
+            start++;
+        if (start >= crlf)
+            break;
+
+        size_t end = start;
+        while (end < crlf && data[end] != ' ')
+            ++end;
+
+        args.emplace_back(data + start, end - start);
+        start = end;
+    }
+    if (args.empty())
+        return {ParseStatus::Error, {}, 0};
+    return {ParseStatus::OK, std::move(args), crlf + 2};
 }

@@ -28,5 +28,6 @@ public:
 
 private:
     static ParseResult ParseMultibulk(const char *data, size_t len);
+    static ParseResult ParseInline(const char *data, size_t len);
 };
 #endif

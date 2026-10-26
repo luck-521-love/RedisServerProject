@@ -72,6 +72,38 @@ int main()
         assert(b.readAble() == 0);
     }
 
+    // 8. inline 命令：PING
+    {
+        auto r = parse("PING\r\n");
+        assert(r.status == ParseStatus::OK);
+        assert(r.args.size() == 1 && r.args[0] == "PING");
+        assert(r.consumed == 6);
+    }
+
+    // 9. inline 多参数：SET k v
+    {
+        auto r = parse("SET k v\r\n");
+        assert(r.status == ParseStatus::OK);
+        assert(r.args.size() == 3);
+        assert(r.args[0] == "SET" && r.args[1] == "k" && r.args[2] == "v");
+        assert(r.consumed == 9);
+    }
+
+    // 10. inline 半包 → NeedMore
+    assert(parse("PIN").status == ParseStatus::NeedMore);
+
+    // 11. inline 多空格：SET   k   v\r\n
+    {
+        auto r = parse("SET   k   v\r\n");
+        assert(r.status == ParseStatus::OK);
+        assert(r.args.size() == 3);
+    }
+
+    // 12. inline 超长且没有换行 → Error
+    {
+        std::string big(70000, 'A');
+        assert(parse(big).status == ParseStatus::Error);
+    }
     std::cout << "all parser tests passed" << std::endl;
     return 0;
 }

@@ -1,6 +1,8 @@
 #include "../include/RedisServer.h"
 #include "../include/RedisCommandHandler.h"
 #include "../include/RedisDatabase.h"
+#include "../include/Buffer.h"
+#include "../include/RespParser.h"
 
 #include <iostream>
 #include <sys/socket.h>
@@ -50,6 +52,18 @@ void RedisServer::shutdown()
     std::cout << "Server Shutdown Complete!\n";
 }
 
+static bool sendAll(int fd, const std::string &data)
+{
+    size_t sent = 0;
+    while (sent < data.size())
+    {
+        ssize_t n = send(fd, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
+        if (n <= 0)
+            return false;
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
 void RedisServer::run()
 {
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -95,17 +109,57 @@ void RedisServer::run()
         }
 
         threads.emplace_back([client_socket, &cmdHandler]()
-                             {
-            char buffer[1024];
-            while (true) {
-                memset(buffer, 0, sizeof(buffer));
-                int bytes = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
-                if (bytes <= 0) break;
-                std::string request(buffer, bytes);
-                std::string response = cmdHandler.processCommand(request);
-                send(client_socket, response.c_str(), response.size(), 0);
+                             { 
+    Buffer readBuf;
+    char tmp[16384];
+    constexpr size_t kMaxReadBuffer = 64 * 1024 * 1024; // 单连接缓冲上限 64MB
+
+    while (true)
+    {
+        ssize_t n = recv(client_socket, tmp, sizeof(tmp), 0);
+        if (n <= 0)
+            break;
+
+        readBuf.Append(tmp, static_cast<size_t>(n));
+
+        std::string out;
+        bool fatal = false;
+
+        // 一次 recv 的数据里可能有多条命令，循环解析
+        while (true)
+        {
+            ParseResult r = RespParser::parseNext(readBuf);
+
+            if (r.status == ParseStatus::NeedMore)
+            {
+                if (readBuf.readAble() > kMaxReadBuffer)
+                {
+                    out += "-ERR Protocol error: too big\r\n";
+                    fatal = true;
+                }
+                break;  // 保留剩余数据，等下一次 recv
             }
-            close(client_socket); });
+
+            if (r.status == ParseStatus::Error)
+            {
+                out += "-ERR Protocol error\r\n";
+                fatal = true;
+                break;
+            }
+
+            // 解析成功：处理命令、累积响应、消费字节
+            out += cmdHandler.processCommand(r.args);
+            readBuf.Consume(r.consumed);
+        }
+
+        if (!out.empty() && !sendAll(client_socket, out))
+            break;
+
+        if (fatal)
+            break;
+    }
+
+    close(client_socket); });
     }
 
     for (auto &t : threads)

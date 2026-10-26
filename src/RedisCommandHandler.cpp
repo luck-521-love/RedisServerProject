@@ -8,86 +8,6 @@
 #include <iostream> // debug
 #include <climits>
 
-// RESP parser:
-// *2\r\n$4\r\n\PING\r\n$4\r\nTEST\r\n
-// *2 -> array has 2 elements
-// $4 -> next string has 4 characters
-// PING
-// TEST
-
-static bool parse_uint(const std::string &s, int &out)
-{
-    if (s.empty())
-        return false;
-    int value = 0;
-    int d = 0;
-    for (char it : s)
-    {
-        if (it < '0' || it > '9')
-            return false;
-        d = it - '0';
-        if (value > (INT_MAX - d) / 10)
-            return false;
-        value = value * 10 + d;
-    }
-
-    out = value;
-    return true;
-}
-std::vector<std::string> parseRespCommand(const std::string &input)
-{
-    std::vector<std::string> tokens;
-    if (input.empty())
-        return tokens;
-
-    if (input[0] != '*')
-    {
-        std::istringstream iss(input);
-        std::string token;
-        while (iss >> token)
-            tokens.push_back(token);
-        return tokens;
-    }
-
-    size_t pos = 0;
-
-    if (input[pos] != '*')
-        return tokens;
-    pos++;
-
-    size_t crlf = input.find("\r\n", pos);
-    if (crlf == std::string::npos)
-        return tokens;
-
-    int numElements = 0;
-    if (!parse_uint(input.substr(pos, crlf - pos), numElements))
-        return tokens;
-
-    pos = crlf + 2;
-
-    for (int i = 0; i < numElements; i++)
-    {
-        if (pos >= input.size() || input[pos] != '$')
-            break;
-        pos++;
-
-        crlf = input.find("\r\n", pos);
-        if (crlf == std::string::npos)
-            break;
-        int len = 0;
-        if (!parse_uint(input.substr(pos, crlf - pos), len))
-            break;
-        pos = crlf + 2;
-
-        if (pos + len + 2 > input.size())
-            break;
-        std::string token = input.substr(pos, len);
-        tokens.push_back(token);
-        pos += len + 2;
-    }
-    return tokens;
-}
-
 static std::string handlePing(const std::vector<std::string> & /*tokens*/, RedisDatabase & /*db*/)
 {
     return "+PONG\r\n";
@@ -430,10 +350,10 @@ static std::string handleHmset(const std::vector<std::string> &tokens, RedisData
 
 RedisCommandHandler::RedisCommandHandler() {}
 
-std::string RedisCommandHandler::processCommand(const std::string &commandLine)
+std::string RedisCommandHandler::processCommand(const std::vector<std::string> &tokens)
 {
     // Use  RESP parser
-    auto tokens = parseRespCommand(commandLine);
+
     if (tokens.empty())
         return "-Error: Empty command\r\n";
 

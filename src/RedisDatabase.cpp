@@ -217,37 +217,74 @@ void RedisDatabase::purgeExpired()
 bool RedisDatabase::rename(const std::string &oldKey, const std::string &newKey)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    purgeExpired();
-    bool found = false;
 
-    if (kv_store.find(oldKey) != kv_store.end())
+    // 只惰性清理这两个 key，不做全表扫描
+    removeIfExpired(oldKey);
+    removeIfExpired(newKey);
+
+    auto exists = [&](const std::string &k)
     {
-        kv_store[newKey] = kv_store.find(oldKey)->second;
-        kv_store.erase(kv_store.find(oldKey));
-        found = true;
+        return kv_store.find(k) != kv_store.end() ||
+               list_store.find(k) != list_store.end() ||
+               hash_store.find(k) != hash_store.end();
+    };
+
+    // 同名：存在就成功且不改变任何数据
+    if (oldKey == newKey)
+        return exists(oldKey);
+
+    if (!exists(oldKey))
+        return false;
+
+    // 记录源 key 的 TTL（如果有）
+    bool hasTtl = false;
+    std::chrono::steady_clock::time_point deadline;
+    auto eit = expiry_map.find(oldKey);
+    if (eit != expiry_map.end())
+    {
+        hasTtl = true;
+        deadline = eit->second;
     }
 
-    if (list_store.find(oldKey) != list_store.end())
+    // 目标 key 的旧数据与旧 TTL 全部清掉
+    kv_store.erase(newKey);
+    list_store.erase(newKey);
+    hash_store.erase(newKey);
+    expiry_map.erase(newKey);
+
+    // 搬 kv
+    auto it = kv_store.find(oldKey);
+    if (it != kv_store.end())
     {
-        list_store[newKey] = list_store.find(oldKey)->second;
-        list_store.erase(list_store.find(oldKey));
-        found = true;
+        std::string tmp = std::move(it->second);
+        kv_store.erase(it);
+        kv_store.emplace(newKey, std::move(tmp));
     }
 
-    if (hash_store.find(oldKey) != hash_store.end())
+    // 搬 list
+    auto lit = list_store.find(oldKey);
+    if (lit != list_store.end())
     {
-        hash_store[newKey] = hash_store.find(oldKey)->second;
-        hash_store.erase(hash_store.find(oldKey));
-        found = true;
+        std::vector<std::string> tmp = std::move(lit->second);
+        list_store.erase(lit);
+        list_store.emplace(newKey, std::move(tmp));
     }
 
-    if (expiry_map.find(oldKey) != expiry_map.end())
+    // 搬 hash
+    auto hit = hash_store.find(oldKey);
+    if (hit != hash_store.end())
     {
-        expiry_map[newKey] = expiry_map.find(oldKey)->second;
-        expiry_map.erase(expiry_map.find(oldKey));
-        found = true;
+        std::unordered_map<std::string, std::string> tmp = std::move(hit->second);
+        hash_store.erase(hit);
+        hash_store.emplace(newKey, std::move(tmp));
     }
-    return found;
+
+    // 迁移 TTL
+    expiry_map.erase(oldKey);
+    if (hasTtl)
+        expiry_map[newKey] = deadline;
+
+    return true;
 }
 
 // List Opreations

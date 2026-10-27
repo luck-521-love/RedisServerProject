@@ -329,16 +329,23 @@ bool RedisDatabase::lpop(const std::string &key, std::string &value)
 
     auto it = list_store.find(key);
 
-    if (it != list_store.end())
+    if (it == list_store.end() || it->second.empty())
+        return false;
+
+    value = it->second.front();
+    it->second.erase(it->second.begin());
+
+    // 最后一个元素被弹出：删除 Key
+    if (it->second.empty())
     {
-        if (!it->second.empty())
-        {
-            value = it->second.front();
-            it->second.erase(it->second.begin());
-            return true;
-        }
+        list_store.erase(it);
+
+        bool stillExists = kv_store.find(key) != kv_store.end() ||
+                           hash_store.find(key) != hash_store.end();
+        if (!stillExists)
+            expiry_map.erase(key);
     }
-    return false;
+    return true;
 }
 
 bool RedisDatabase::rpop(const std::string &key, std::string &value)
@@ -347,13 +354,22 @@ bool RedisDatabase::rpop(const std::string &key, std::string &value)
 
     auto it = list_store.find(key);
 
-    if (it != list_store.end() && !it->second.empty())
+    if (it == list_store.end() || it->second.empty())
+        return false;
+
+    value = it->second.back();
+    it->second.pop_back();
+
+    if (it->second.empty())
     {
-        value = it->second.back();
-        it->second.pop_back();
-        return true;
+        list_store.erase(it);
+
+        bool stillExists = kv_store.find(key) != kv_store.end() ||
+                           hash_store.find(key) != hash_store.end();
+        if (!stillExists)
+            expiry_map.erase(key);
     }
-    return false;
+    return true;
 }
 
 int RedisDatabase::lrem(const std::string &key, int count, const std::string &value)
@@ -407,6 +423,16 @@ int RedisDatabase::lrem(const std::string &key, int count, const std::string &va
                 ++riter;
             }
         }
+    }
+    if (it->second.empty())
+    {
+        list_store.erase(it);
+
+        bool stillExists = kv_store.find(key) != kv_store.end() ||
+                           hash_store.find(key) != hash_store.end();
+
+        if (!stillExists)
+            expiry_map.erase(key);
     }
     return removed;
 }

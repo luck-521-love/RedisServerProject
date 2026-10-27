@@ -118,6 +118,51 @@ assert_eq "SET ttl:three new" "OK" "$(cli SET ttl:three new)"
 sleep 2
 assert_eq "旧 TTL 不影响 SET 后的新值" "new" "$(cli GET ttl:three)"
 
+# ---- Phase A: 数据正确性回归（先红后绿） ----
+
+# ① RENAME 同名：不能把 key 删掉
+assert_eq "SET rename:self v" "OK" "$(cli SET rename:self v)"
+assert_eq "RENAME 同名返回 OK" "OK" "$(cli RENAME rename:self rename:self)"
+assert_eq "RENAME 同名后 key 仍在" "v" "$(cli GET rename:self)"
+
+# ① RENAME 到已有其它类型：目标旧类型必须被替换
+assert_eq "SET rename:dest old" "OK" "$(cli SET rename:dest old)"
+assert_eq "RPUSH rename:src a" "1" "$(cli RPUSH rename:src a)"
+assert_eq "RENAME 跨类型" "OK" "$(cli RENAME rename:src rename:dest)"
+assert_eq "RENAME 后目标类型为 list" "list" "$(cli TYPE rename:dest)"
+assert_eq "RENAME 后目标 list 内容" "a" "$(cli LGET rename:dest)"
+
+# ① 源无 TTL、目标有 TTL：旧 TTL 必须清除
+assert_eq "SET rename:d v" "OK" "$(cli SET rename:d v)"
+assert_eq "EXPIRE rename:d 100" "1" "$(cli EXPIRE rename:d 100)"
+assert_eq "SET rename:s v" "OK" "$(cli SET rename:s v)"
+assert_eq "RENAME 到有 TTL 的目标" "OK" "$(cli RENAME rename:s rename:d)"
+assert_eq "源无 TTL 时目标 TTL 必须为 -1" "-1" "$(cli TTL rename:d)"
+
+# ② 过期后的写操作不能被旧 TTL 误删
+assert_eq "HSET expired:h f v" "1" "$(cli HSET expired:h f v)"
+assert_eq "EXPIRE expired:h 1" "1" "$(cli EXPIRE expired:h 1)"
+sleep 2
+assert_eq "过期后 HSET 新字段" "1" "$(cli HSET expired:h g w)"
+assert_eq "过期后 HGET 新字段" "w" "$(cli HGET expired:h g)"
+assert_eq "过期后旧字段应消失" "" "$(cli HGET expired:h f)"
+
+# ③ 列表最后一个元素被弹出后，key 应删除
+assert_eq "RPUSH empty:list a" "1" "$(cli RPUSH empty:list a)"
+assert_eq "LPOP 最后一个元素" "a" "$(cli LPOP empty:list)"
+assert_eq "LPOP 后 TYPE 应为 none" "none" "$(cli TYPE empty:list)"
+assert_eq "LPOP 后 KEYS 不含该 key" "0" "$(cli KEYS '*' | grep -c '^empty:list$')"
+# RPOP 最后一个元素后 key 也应删除
+assert_eq "RPUSH empty:list2 a" "1" "$(cli RPUSH empty:list2 a)"
+assert_eq "RPOP 最后一个元素" "a" "$(cli RPOP empty:list2)"
+assert_eq "RPOP 后 TYPE 应为 none" "none" "$(cli TYPE empty:list2)"
+
+# LREM 删除全部元素后 key 也应删除
+assert_eq "RPUSH empty:list3 a" "1" "$(cli RPUSH empty:list3 a)"
+assert_eq "LREM 删除全部" "1" "$(cli LREM empty:list3 0 a)"
+assert_eq "LREM 后 TYPE 应为 none" "none" "$(cli TYPE empty:list3)"
+
+
 echo
 echo "== 结果：PASS=$PASS FAIL=$FAIL =="
 [ "$FAIL" -eq 0 ] || exit 1 

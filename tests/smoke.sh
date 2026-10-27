@@ -3,7 +3,8 @@
 set -u
 
 PORT=6378
-SERVER="$HOME/RedisServer/my_redis_server"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SERVER="$ROOT/my_redis_server"
 WORK=/tmp/redis-test-run
 
 PASS=0
@@ -168,6 +169,20 @@ sleep 2
 assert_eq "过期后 RPUSH 新元素" "1" "$(cli RPUSH expired:list b)"
 assert_eq "过期后 LLEN" "1" "$(cli LLEN expired:list)"
 assert_eq "过期后 LGET" "b" "$(cli LGET expired:list)"
+# SET 必须覆盖同名的 list/hash，KEYS 不能重复
+assert_eq "LPUSH ks:1 a" "1" "$(cli LPUSH ks:1 a)"
+assert_eq "SET 覆盖 list" "OK" "$(cli SET ks:1 text)"
+assert_eq "覆盖后 TYPE" "string" "$(cli TYPE ks:1)"
+assert_eq "覆盖后 GET" "text" "$(cli GET ks:1)"
+assert_eq "覆盖后 LLEN 为 0" "0" "$(cli LLEN ks:1)"
+assert_eq "KEYS 中 ks:1 只出现一次" "1" "$(cli KEYS '*' | grep -c '^ks:1$')"
+
+assert_eq "HSET ks:2 f v" "1" "$(cli HSET ks:2 f v)"
+assert_eq "SET 覆盖 hash" "OK" "$(cli SET ks:2 text)"
+assert_eq "覆盖后 HGETALL 为空" "" "$(cli HGETALL ks:2)"
+assert_eq "覆盖后 TYPE" "string" "$(cli TYPE ks:2)"
+
+
 
 echo
 echo "== 结果：PASS=$PASS FAIL=$FAIL =="

@@ -5,6 +5,7 @@
 #include <sstream>
 #include <algorithm>
 #include <iterator>
+#include <unordered_set>
 
 RedisDatabase &RedisDatabase::getInstance()
 {
@@ -99,7 +100,9 @@ bool RedisDatabase::persist(const std::string &key)
 void RedisDatabase::set(const std::string &key, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    removeIfExpired(key);  // 清理过期残留数据
+    removeIfExpired(key); // 清理过期残留数据
+    list_store.erase(key);
+    hash_store.erase(key);
     expiry_map.erase(key); // 清除旧的TTL (不管有没有)
     kv_store[key] = value;
     return;
@@ -124,19 +127,22 @@ std::vector<std::string> RedisDatabase::keys()
     std::lock_guard<std::mutex> lock(db_mutex);
     purgeExpired();
 
+    std::unordered_set<std::string> seen;
     std::vector<std::string> result;
-    for (auto &pair : kv_store)
-    {
-        result.push_back(pair.first);
-    }
-    for (auto &pair : list_store)
-    {
-        result.push_back(pair.first);
-    }
-    for (auto &pair : hash_store)
-    {
-        result.push_back(pair.first);
-    }
+    for (const auto &pair : kv_store)
+
+        if (seen.insert(pair.first).second)
+            result.push_back(pair.first);
+
+    for (const auto &pair : list_store)
+
+        if (seen.insert(pair.first).second)
+            result.push_back(pair.first);
+
+    for (const auto &pair : hash_store)
+        if (seen.insert(pair.first).second)
+            result.push_back(pair.first);
+
     return result;
 }
 

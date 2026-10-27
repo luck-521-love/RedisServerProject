@@ -5,3 +5,5 @@ dump.my_rdb
 build
 
 my_redis_server
+
+server.log

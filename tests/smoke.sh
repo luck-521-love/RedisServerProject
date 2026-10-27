@@ -161,7 +161,13 @@ assert_eq "RPOP 后 TYPE 应为 none" "none" "$(cli TYPE empty:list2)"
 assert_eq "RPUSH empty:list3 a" "1" "$(cli RPUSH empty:list3 a)"
 assert_eq "LREM 删除全部" "1" "$(cli LREM empty:list3 0 a)"
 assert_eq "LREM 后 TYPE 应为 none" "none" "$(cli TYPE empty:list3)"
-
+# 过期 list 上继续 RPUSH：旧数据不能复活
+assert_eq "RPUSH expired:list a" "1" "$(cli RPUSH expired:list a)"
+assert_eq "EXPIRE expired:list 1" "1" "$(cli EXPIRE expired:list 1)"
+sleep 2
+assert_eq "过期后 RPUSH 新元素" "1" "$(cli RPUSH expired:list b)"
+assert_eq "过期后 LLEN" "1" "$(cli LLEN expired:list)"
+assert_eq "过期后 LGET" "b" "$(cli LGET expired:list)"
 
 echo
 echo "== 结果：PASS=$PASS FAIL=$FAIL =="

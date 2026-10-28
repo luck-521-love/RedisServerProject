@@ -182,6 +182,43 @@ def main():
         s.sendall(b"LREM wt:none 0 a\r\n")
         check("LREM missing -> 0", b":0\r\n", recv_n(s, 4))
         s.close()
+                # 13. hash 命令作用在 string key 上 → WRONGTYPE
+        hash_cmds = [
+            b"HSET wt:str f v",
+            b"HMSET wt:str f v",
+            b"HGET wt:str f",
+            b"HEXISTS wt:str f",
+            b"HDEL wt:str f",
+            b"HGETALL wt:str",
+            b"HKEYS wt:str",
+            b"HVALS wt:str",
+            b"HLEN wt:str",
+        ]
+        for cmd in hash_cmds:
+            s = connect()
+            s.sendall(b"SET wt:str v\r\n")
+            recv_n(s, 5)
+            s.sendall(cmd + b"\r\n")
+            check(f"{cmd.decode()} on string -> WRONGTYPE",
+                  WRONGTYPE, recv_n(s, len(WRONGTYPE)))
+            s.close()
+
+        # 14. 缺失 hash 的默认返回
+        s = connect()
+        s.sendall(b"HGET wt:none f\r\n")
+        check("HGET missing -> nil", b"$-1\r\n", recv_n(s, 5))
+        s.sendall(b"HGETALL wt:none\r\n")
+        check("HGETALL missing -> empty array", b"*0\r\n", recv_n(s, 4))
+        s.sendall(b"HLEN wt:none\r\n")
+        check("HLEN missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.sendall(b"HDEL wt:none f\r\n")
+        check("HDEL missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.sendall(b"HEXISTS wt:none f\r\n")
+        check("HEXISTS missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.close()
+              
+
+       
     finally:
         proc.kill()
         proc.wait()

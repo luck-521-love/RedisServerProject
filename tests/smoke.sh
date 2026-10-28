@@ -181,7 +181,9 @@ assert_eq "KEYS 中 ks:1 只出现一次" "1" "$(cli KEYS '*' | grep -c '^ks:1$'
 
 assert_eq "HSET ks:2 f v" "1" "$(cli HSET ks:2 f v)"
 assert_eq "SET 覆盖 hash" "OK" "$(cli SET ks:2 text)"
-assert_eq "覆盖后 HGETALL 为空" "" "$(cli HGETALL ks:2)"
+assert_eq "覆盖后 HGETALL 应为 WRONGTYPE" \
+  "WRONGTYPE Operation against a key holding the wrong kind of value" \
+  "$(cli HGETALL ks:2 2>&1)"
 assert_eq "覆盖后 TYPE" "string" "$(cli TYPE ks:2)"
 
 

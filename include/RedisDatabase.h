@@ -47,15 +47,15 @@ public:
     Status lset(const std::string &key, int index, const std::string &value);
 
     // Hash Operations
-    bool hset(const std::string &key, const std::string &field, const std::string &value);
-    bool hget(const std::string &key, const std::string &field, std::string &value);
-    bool hexists(const std::string &key, const std::string &field);
-    bool hdel(const std::string &key, const std::string &field);
-    std::unordered_map<std::string, std::string> hgetall(const std::string &key);
-    std::vector<std::string> hkeys(const std::string &key);
-    std::vector<std::string> hvals(const std::string &key);
-    ssize_t hlen(const std::string &key);
-    bool hmset(const std::string &key, const std::vector<std::pair<std::string, std::string>> &fieldValues);
+    Status hset(const std::string &key, const std::string &field, const std::string &value, bool &added);
+    Status hget(const std::string &key, const std::string &field, std::string &value);
+    Status hexists(const std::string &key, const std::string &field, bool &exists);
+    Status hdel(const std::string &key, const std::string &field, bool &removed);
+    Status hgetall(const std::string &key, std::unordered_map<std::string, std::string> &out);
+    Status hkeys(const std::string &key, std::vector<std::string> &out);
+    Status hvals(const std::string &key, std::vector<std::string> &out);
+    Status hlen(const std::string &key, ssize_t &out);
+    Status hmset(const std::string &key, const std::vector<std::pair<std::string, std::string>> &fieldValues);
 
     // Persistance: Dump / load the database from a file.
     bool dump(const std::string &filename);

@@ -96,6 +96,18 @@ bool RedisDatabase::persist(const std::string &key)
     expiry_map.erase(it);
     return true;
 }
+
+RedisDatabase::KeyType RedisDatabase::keyTypeOf(const std::string &key) const
+{
+    if (kv_store.find(key) != kv_store.end())
+        return KeyType::String;
+    if (list_store.find(key) != list_store.end())
+        return KeyType::List;
+    if (hash_store.find(key) != hash_store.end())
+        return KeyType::Hash;
+    return KeyType::None;
+}
+
 // Key/Value Operations
 void RedisDatabase::set(const std::string &key, const std::string &value)
 {
@@ -108,18 +120,20 @@ void RedisDatabase::set(const std::string &key, const std::string &value)
     return;
 }
 
-bool RedisDatabase::get(const std::string &key, std::string &value)
+Status RedisDatabase::get(const std::string &key, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    purgeExpired();
-    auto it = kv_store.find(key);
 
-    if (it != kv_store.end())
-    {
-        value = it->second;
-        return true;
-    }
-    return false;
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t == KeyType::List || t == KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    value = kv_store.find(key)->second;
+    return Status::OK;
 }
 
 std::vector<std::string> RedisDatabase::keys()
@@ -294,78 +308,104 @@ bool RedisDatabase::rename(const std::string &oldKey, const std::string &newKey)
 }
 
 // List Opreations
-std::vector<std::string> RedisDatabase::lget(const std::string &key)
+Status RedisDatabase::lget(const std::string &key, std::vector<std::string> &out)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return {};
-    auto it = list_store.find(key);
-    if (it != list_store.end())
-    {
-        return it->second;
-    }
-    return {};
+
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+    out = list_store.find(key)->second;
+    return Status::OK;
 }
 
-ssize_t RedisDatabase::llen(const std::string &key)
+Status RedisDatabase::llen(const std::string &key, ssize_t &out)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return 0;
-    if (list_store.find(key) != list_store.end())
-        return list_store.find(key)->second.size();
-    return 0;
+
+    removeIfExpired(key);
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+    out = static_cast<ssize_t>(list_store.find(key)->second.size());
+    return Status::OK;
 }
 
-void RedisDatabase::lpush(const std::string &key, const std::string &value)
+Status RedisDatabase::lpush(const std::string &key, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
     removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
     list_store[key].insert(list_store[key].begin(), value);
+    return Status::OK;
 }
 
-void RedisDatabase::rpush(const std::string &key, const std::string &value)
+Status RedisDatabase::rpush(const std::string &key, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
     removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
     list_store[key].push_back(value);
+    return Status::OK;
 }
 
-bool RedisDatabase::lpop(const std::string &key, std::string &value)
+Status RedisDatabase::lpop(const std::string &key, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = list_store.find(key);
+    removeIfExpired(key);
 
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = list_store.find(key);
     if (it == list_store.end() || it->second.empty())
-        return false;
+        return Status::NotFound;
 
     value = it->second.front();
     it->second.erase(it->second.begin());
 
-    // 最后一个元素被弹出：删除 Key
     if (it->second.empty())
     {
         list_store.erase(it);
-
         bool stillExists = kv_store.find(key) != kv_store.end() ||
                            hash_store.find(key) != hash_store.end();
+
         if (!stillExists)
             expiry_map.erase(key);
     }
-    return true;
+    return Status::OK;
 }
 
-bool RedisDatabase::rpop(const std::string &key, std::string &value)
+Status RedisDatabase::rpop(const std::string &key, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = list_store.find(key);
+    removeIfExpired(key);
 
+    KeyType t = keyTypeOf(key);
+
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = list_store.find(key);
     if (it == list_store.end() || it->second.empty())
-        return false;
+        return Status::NotFound;
 
     value = it->second.back();
     it->second.pop_back();
@@ -373,25 +413,29 @@ bool RedisDatabase::rpop(const std::string &key, std::string &value)
     if (it->second.empty())
     {
         list_store.erase(it);
-
         bool stillExists = kv_store.find(key) != kv_store.end() ||
                            hash_store.find(key) != hash_store.end();
+
         if (!stillExists)
             expiry_map.erase(key);
     }
-    return true;
+    return Status::OK;
 }
 
-int RedisDatabase::lrem(const std::string &key, int count, const std::string &value)
+Status RedisDatabase::lrem(const std::string &key, int count, const std::string &value, int &removed)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return 0;
-    int removed = 0;
-    auto it = list_store.find(key);
-    if (it == list_store.end())
-        return 0;
+    removeIfExpired(key);
 
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+
+    removed = 0;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = list_store.find(key);
     auto &lst = it->second;
 
     if (count == 0)
@@ -436,7 +480,7 @@ int RedisDatabase::lrem(const std::string &key, int count, const std::string &va
             }
         }
     }
-    if (it->second.empty())
+    if (lst.empty())
     {
         list_store.erase(it);
 
@@ -446,204 +490,240 @@ int RedisDatabase::lrem(const std::string &key, int count, const std::string &va
         if (!stillExists)
             expiry_map.erase(key);
     }
-    return removed;
+    return Status::OK;
 }
 
-bool RedisDatabase::lindex(const std::string &key, int index, std::string &value)
+Status RedisDatabase::lindex(const std::string &key, int index, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = list_store.find(key);
 
-    if (it == list_store.end())
-        return false;
+    removeIfExpired(key);
 
-    const auto &lst = it->second;
-    if (index < 0)
-        index = it->second.size() + index;
-    if (index < 0 || index >= static_cast<int>(lst.size()))
-        return false;
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+    const auto &lst = list_store.find(key)->second;
 
-    value = lst[index];
-    return true;
+    long long idx = static_cast<long long>(index);
+    if (idx < 0)
+        idx += static_cast<long long>(lst.size());
+    if (idx < 0 || idx >= static_cast<long long>(lst.size()))
+        return Status::NotFound;
+    value = lst[static_cast<size_t>(idx)];
+    return Status::OK;
 }
 
-bool RedisDatabase::lset(const std::string &key, int index, const std::string &value)
-{
-    std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = list_store.find(key);
-    if (it == list_store.end())
-        return false;
-
-    auto &lst = it->second;
-    if (index < 0)
-        index = it->second.size() + index;
-    if (index < 0 || index >= static_cast<int>(lst.size()))
-        return false;
-
-    lst[index] = value;
-    return true;
-}
-
-// Hash Operations
-bool RedisDatabase::hset(const std::string &key, const std::string &field, const std::string &value)
+Status RedisDatabase::lset(const std::string &key, int index, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
     removeIfExpired(key);
-    // 1. 查找外层 key
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto &lst = list_store.find(key)->second;
+
+    long long idx = static_cast<long long>(index);
+
+    if (idx < 0)
+        idx += static_cast<long long>(lst.size());
+    if (idx < 0 || idx >= static_cast<long long>(lst.size()))
+        return Status::NotFound;
+
+    lst[static_cast<size_t>(idx)] = value;
+
+    return Status::OK;
+}
+
+// Hash Operations
+Status RedisDatabase::hset(const std::string &key, const std::string &field, const std::string &value, bool &added)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+
+    auto &hash = hash_store[key];
+    auto it = hash.find(field);
+    if (it == hash.end())
+    {
+        hash.emplace(field, value);
+        added = true;
+    }
+    else
+    {
+        it->second = value;
+        added = false;
+    }
+    return Status::OK;
+}
+
+Status RedisDatabase::hget(const std::string &key, const std::string &field, std::string &value)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto KeyIt = hash_store.find(key);
+    auto fieldIt = KeyIt->second.find(field);
+    if (fieldIt == KeyIt->second.end())
+        return Status::NotFound;
+    value = fieldIt->second;
+    return Status::OK;
+}
+
+Status RedisDatabase::hexists(const std::string &key, const std::string &field, bool &exists)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
     auto keyIt = hash_store.find(key);
-    // 2. 如果 key 不存在，创建 Hash 和 field
-    if (keyIt == hash_store.end())
-    {
-        hash_store[key][field] = value;
-        return true;
-    }
-    // 3. key 存在，查找内部 field
     auto fieldIt = keyIt->second.find(field);
-
-    // 4. field 不存在，新增字段
-    if (fieldIt == keyIt->second.end())
-    {
-        keyIt->second.emplace(field, value);
-        return true;
-    }
-    // 5. field 已存在，只更新 value
-    fieldIt->second = value;
-
-    return false; // 表示没有新增field ，不是修改失败；
+    if (fieldIt != keyIt->second.end())
+        exists = true;
+    else
+        exists = false;
+    return Status::OK;
 }
 
-bool RedisDatabase::hget(const std::string &key, const std::string &field, std::string &value)
+Status RedisDatabase::hdel(const std::string &key, const std::string &field, bool &removed)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = hash_store.find(key);
+    removeIfExpired(key);
 
-    if (it != hash_store.end())
-    {
-        auto f = it->second.find(field);
-        if (f != it->second.end())
-        {
-            value = f->second;
-            return true;
-        }
-    }
-    return false;
-}
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
 
-bool RedisDatabase::hexists(const std::string &key, const std::string &field)
-{
-    std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = hash_store.find(key);
-
-    if (it != hash_store.end())
-    {
-        auto f = it->second.find(field);
-        if (f != it->second.end())
-            return true;
-    }
-    return false;
-}
-
-bool RedisDatabase::hdel(const std::string &key, const std::string &field)
-{
-    std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
     auto keyIt = hash_store.find(key);
-
-    if (keyIt == hash_store.end())
-        return false;
-
     auto fieldIt = keyIt->second.find(field);
     if (fieldIt == keyIt->second.end())
-        return false;
+        return Status::NotFound;
 
-    keyIt->second.erase(field);
+    keyIt->second.erase(fieldIt);
 
     if (keyIt->second.empty())
     {
         hash_store.erase(keyIt);
-
-        bool keyStillExists =
-            kv_store.find(key) != kv_store.end() ||
-            list_store.find(key) != list_store.end() ||
-            hash_store.find(key) != hash_store.end();
-
-        if (!keyStillExists)
+        bool stillExists = kv_store.find(key) != kv_store.end() ||
+                           list_store.find(key) != list_store.end();
+        if (!stillExists)
             expiry_map.erase(key);
     }
-    return true;
+    removed = true;
+    return Status::OK;
 }
 
-std::unordered_map<std::string, std::string> RedisDatabase::hgetall(const std::string &key)
-{
-    std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return {};
-    auto it = hash_store.find(key);
-    if (it != hash_store.end())
-        return hash_store[key];
-    return {};
-}
-
-std::vector<std::string> RedisDatabase::hkeys(const std::string &key)
-{
-    std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return {};
-    std::vector<std::string> fields;
-    auto it = hash_store.find(key);
-    if (it != hash_store.end())
-    {
-        for (const auto &pair : it->second)
-            fields.push_back(pair.first);
-    }
-    return fields;
-}
-
-std::vector<std::string> RedisDatabase::hvals(const std::string &key)
-{
-    std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return {};
-    std::vector<std::string> values;
-
-    auto it = hash_store.find(key);
-    if (it != hash_store.end())
-    {
-        for (const auto &pair : it->second)
-            values.push_back(pair.second);
-    }
-    return values;
-}
-
-ssize_t RedisDatabase::hlen(const std::string &key)
-{
-    std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return 0;
-    auto it = hash_store.find(key);
-    if (it != hash_store.end())
-        return it->second.size();
-    return 0;
-}
-
-bool RedisDatabase::hmset(const std::string &key, const std::vector<std::pair<std::string, std::string>> &fieldValues)
+Status RedisDatabase::hgetall(const std::string &key, std::unordered_map<std::string, std::string> &out)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
     removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = hash_store.find(key);
+    out.clear();
+    if (it != hash_store.end())
+        out = it->second;
+    return Status::OK;
+}
+
+Status RedisDatabase::hkeys(const std::string &key, std::vector<std::string> &out)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = hash_store.find(key);
+    if (it != hash_store.end())
+    {
+        for (const auto &pair : it->second)
+            out.push_back(pair.first);
+    }
+    return Status::OK;
+}
+
+Status RedisDatabase::hvals(const std::string &key, std::vector<std::string> &out)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = hash_store.find(key);
+    if (it != hash_store.end())
+    {
+        for (const auto &pair : it->second)
+            out.push_back(pair.second);
+    }
+    return Status::OK;
+}
+
+Status RedisDatabase::hlen(const std::string &key, ssize_t &out)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto keyIt = hash_store.find(key);
+
+    out = static_cast<ssize_t>(keyIt->second.size());
+    return Status::OK;
+}
+
+Status RedisDatabase::hmset(const std::string &key, const std::vector<std::pair<std::string, std::string>> &fieldValues)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+    removeIfExpired(key);
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::Hash)
+        return Status::WrongType;
+
     for (const auto &pair : fieldValues)
     {
         hash_store[key][pair.first] = pair.second;
     }
-    return true;
+    return Status::OK;
 }
 
 bool RedisDatabase::dump(const std::string &filename)

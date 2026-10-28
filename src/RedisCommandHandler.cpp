@@ -7,6 +7,8 @@
 #include <exception>
 #include <iostream> // debug
 #include <climits>
+static const char *kErrWrongType =
+    "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 
 static std::string handlePing(const std::vector<std::string> & /*tokens*/, RedisDatabase & /*db*/)
 {
@@ -64,9 +66,13 @@ static std::string handleGet(const std::vector<std::string> &tokens, RedisDataba
     if (tokens.size() < 2)
         return "-Error: GET requires key\r\n";
     std::string value;
-    if (db.get(tokens[1], value))
-        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-    return "$-1\r\n";
+    Status st = db.get(tokens[1], value);
+
+    if (st == Status::WrongType)
+        return "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
+    if (st == Status::NotFound)
+        return "$-1\r\n";
+    return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
 }
 
 static std::string handleKeys(const std::vector<std::string> & /*tokens*/, RedisDatabase &db)
@@ -128,9 +134,15 @@ static std::string handleLget(const std::vector<std::string> &tokens, RedisDatab
 {
     if (tokens.size() < 2)
         return "-Error: LGET requires a key\r\n";
-    auto elems = db.lget(tokens[1]);
+
+    std::vector<std::string> elems;
+    Status st = db.lget(tokens[1], elems);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+
     std::ostringstream oss;
     oss << "*" << elems.size() << "\r\n";
+
     for (const auto &e : elems)
     {
         oss << "$" << e.size() << "\r\n"
@@ -143,7 +155,12 @@ static std::string handleLlen(const std::vector<std::string> &tokens, RedisDatab
 {
     if (tokens.size() < 2)
         return "-Error: LLEN require key\r\n";
-    size_t len = db.llen(tokens[1]);
+
+    ssize_t len = 0;
+    Status st = db.llen(tokens[1], len);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+
     return ":" + std::to_string(len) + "\r\n";
 }
 
@@ -153,9 +170,14 @@ static std::string handleLpush(const std::vector<std::string> &tokens, RedisData
         return "-Error: LPUSH requires key and value\r\n";
     for (size_t i = 2; i < tokens.size(); ++i)
     {
-        db.lpush(tokens[1], tokens[i]);
+        Status st = db.lpush(tokens[1], tokens[i]);
+        if (st == Status::WrongType)
+            return kErrWrongType;
     }
-    size_t len = db.llen(tokens[1]);
+    ssize_t len = 0;
+    Status st = db.llen(tokens[1], len);
+    if (st == Status::WrongType)
+        return kErrWrongType;
     return ":" + std::to_string(len) + "\r\n";
 }
 
@@ -165,10 +187,15 @@ static std::string handleRpush(const std::vector<std::string> &tokens, RedisData
         return "-Error: RPUSH requires key and value\r\n";
     for (size_t i = 2; i < tokens.size(); ++i)
     {
-        db.rpush(tokens[1], tokens[i]);
+        Status st = db.rpush(tokens[1], tokens[i]);
+        if (st == Status::WrongType)
+            return kErrWrongType;
     }
 
-    size_t len = db.llen(tokens[1]);
+    ssize_t len = 0;
+    Status st = db.llen(tokens[1], len);
+    if (st == Status::WrongType)
+        return kErrWrongType;
     return ":" + std::to_string(len) + "\r\n";
 }
 
@@ -177,9 +204,13 @@ static std::string handleLpop(const std::vector<std::string> &tokens, RedisDatab
     if (tokens.size() < 2)
         return "-Error: LPOP requires key\r\n";
     std::string value;
-    if (db.lpop(tokens[1], value))
-        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-    return "$-1\r\n";
+    Status st = db.lpop(tokens[1], value);
+
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return "$-1\r\n";
+    return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
 }
 
 static std::string handleRpop(const std::vector<std::string> &tokens, RedisDatabase &db)
@@ -187,9 +218,12 @@ static std::string handleRpop(const std::vector<std::string> &tokens, RedisDatab
     if (tokens.size() < 2)
         return "-Error: RPOP requires key\r\n";
     std::string value;
-    if (db.rpop(tokens[1], value))
-        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-    return "$-1\r\n";
+    Status st = db.rpop(tokens[1], value);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return "$-1\r\n";
+    return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
 }
 
 static std::string handleLrem(const std::vector<std::string> &tokens, RedisDatabase &db)
@@ -199,7 +233,10 @@ static std::string handleLrem(const std::vector<std::string> &tokens, RedisDatab
     try
     {
         int count = std::stoi(tokens[2]);
-        int removed = db.lrem(tokens[1], count, tokens[3]);
+        int removed = 0;
+        Status st = db.lrem(tokens[1], count, tokens[3], removed);
+        if (st == Status::WrongType)
+            return kErrWrongType;
         return ":" + std::to_string(removed) + "\r\n";
     }
     catch (const std::exception &)
@@ -212,14 +249,19 @@ static std::string handleLindex(const std::vector<std::string> &tokens, RedisDat
 {
     if (tokens.size() < 3)
         return "-Error: LINDEX requires key and index\r\n";
+
     try
     {
         int index = std::stoi(tokens[2]);
         std::string value;
-        if (db.lindex(tokens[1], index, value))
-            return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-        else
+        Status st = db.lindex(tokens[1], index, value);
+
+        if (st == Status::WrongType)
+            return kErrWrongType;
+        if (st == Status::NotFound)
             return "$-1\r\n";
+
+        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
     }
     catch (const std::exception &)
     {
@@ -234,10 +276,12 @@ static std::string handleLset(const std::vector<std::string> &tokens, RedisDatab
     try
     {
         int index = std::stoi(tokens[2]);
-        if (db.lset(tokens[1], index, tokens[3]))
-            return "+OK\r\n";
-        else
-            return "-Error: Index out of range\r\n";
+        Status st = db.lset(tokens[1], index, tokens[3]);
+        if (st == Status::WrongType)
+            return kErrWrongType;
+        if (st == Status::NotFound)
+            return "-Error: Key not found or index out of range\r\n";
+        return "+OK\r\n";
     }
     catch (const std::exception &)
     {
@@ -251,7 +295,11 @@ static std::string handleHset(const std::vector<std::string> &tokens, RedisDatab
 {
     if (tokens.size() < 4)
         return "-Error: HSET requires key, field and value\r\n";
-    bool added = db.hset(tokens[1], tokens[2], tokens[3]);
+    bool added = 0;
+    Status st = db.hset(tokens[1], tokens[2], tokens[3], added);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+
     return ":" + std::to_string(added ? 1 : 0) + "\r\n";
 }
 
@@ -260,16 +308,25 @@ static std::string handleHget(const std::vector<std::string> &tokens, RedisDatab
     if (tokens.size() < 3)
         return "-Error: HGET requires key and field\r\n";
     std::string value;
-    if (db.hget(tokens[1], tokens[2], value))
-        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-    return "$-1\r\n";
+    Status st = db.hget(tokens[1], tokens[2], value);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return "$-1\r\n";
+
+    return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
 }
 
 static std::string handleHexists(const std::vector<std::string> &tokens, RedisDatabase &db)
 {
     if (tokens.size() < 3)
         return "-Error: HEXISTS requires key and field\r\n";
-    bool exists = db.hexists(tokens[1], tokens[2]);
+    bool exists = 0;
+    Status st = db.hexists(tokens[1], tokens[2], exists);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return ":0\r\n";
     return ":" + std::to_string(exists ? 1 : 0) + "\r\n";
 }
 
@@ -277,15 +334,25 @@ static std::string handleHdel(const std::vector<std::string> &tokens, RedisDatab
 {
     if (tokens.size() < 3)
         return "-Error: HDEL requires key and field\r\n";
-    bool res = db.hdel(tokens[1], tokens[2]);
-    return ":" + std::to_string(res ? 1 : 0) + "\r\n";
+    bool removed = 0;
+    Status st = db.hdel(tokens[1], tokens[2], removed);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return ":0\r\n";
+    return ":" + std::to_string(removed ? 1 : 0) + "\r\n";
 }
 
 static std::string handleHgetall(const std::vector<std::string> &tokens, RedisDatabase &db)
 {
     if (tokens.size() < 2)
         return "-Error: HGETALL requires key\r\n";
-    auto hash = db.hgetall(tokens[1]);
+    std::unordered_map<std::string, std::string> hash;
+    Status st = db.hgetall(tokens[1], hash);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return "*0\r\n";
     std::ostringstream oss;
     oss << "*" << hash.size() * 2 << "\r\n";
     for (const auto &pair : hash)
@@ -301,7 +368,12 @@ static std::string handleHkeys(const std::vector<std::string> &tokens, RedisData
 {
     if (tokens.size() < 2)
         return "-Error: HKEYS requires key\r\n";
-    auto keys = db.hkeys(tokens[1]);
+    std::vector<std::string> keys;
+    Status st = db.hkeys(tokens[1], keys);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return "*0\r\n";
     std::ostringstream oss;
     oss << "*" << keys.size() << "\r\n";
     for (const auto &key : keys)
@@ -316,7 +388,12 @@ static std::string handleHvals(const std::vector<std::string> &tokens, RedisData
 {
     if (tokens.size() < 2)
         return "-Error: HVALS requires key\r\n";
-    auto values = db.hvals(tokens[1]);
+    std::vector<std::string> values;
+    Status st = db.hvals(tokens[1], values);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return "*0\r\n";
     std::ostringstream oss;
     oss << "*" << values.size() << "\r\n";
     for (const auto &val : values)
@@ -331,7 +408,12 @@ static std::string handleHlen(const std::vector<std::string> &tokens, RedisDatab
 {
     if (tokens.size() < 2)
         return "-Error: HLEN requires key\r\n";
-    size_t len = db.hlen(tokens[1]);
+    ssize_t len = 0;
+    Status st = db.hlen(tokens[1], len);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return ":0\r\n";
     return ":" + std::to_string(len) + "\r\n";
 }
 
@@ -339,12 +421,16 @@ static std::string handleHmset(const std::vector<std::string> &tokens, RedisData
 {
     if (tokens.size() < 4 || ((tokens.size() - 2) % 2 != 0))
         return "-Error: HMSET requires key followed by field value pairs\r\n";
+
     std::vector<std::pair<std::string, std::string>> fieldValues;
+
     for (size_t i = 2; i + 1 < tokens.size(); i += 2)
     {
         fieldValues.emplace_back(tokens[i], tokens[i + 1]);
     }
-    db.hmset(tokens[1], fieldValues);
+    Status st = db.hmset(tokens[1], fieldValues);
+    if (st == Status::WrongType)
+        return kErrWrongType;
     return "+OK\r\n";
 }
 

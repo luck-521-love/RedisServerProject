@@ -121,6 +121,104 @@ def main():
         s.sendall(b"PING\r\n")
         check("server alive after malformed", b"+PONG\r\n", recv_n(s, 7))
         s.close()
+         # 7. GET 读错误类型 → WRONGTYPE
+        s = connect()
+        s.sendall(b"LPUSH wt:list a\r\n")
+        check("prepare list for WRONGTYPE", b":1\r\n", recv_n(s, 4))
+        expected = b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+        s.sendall(b"GET wt:list\r\n")
+        check("GET on list returns WRONGTYPE", expected, recv_n(s, len(expected)))
+        s.close()
+
+        # 8. GET 不存在的 key 仍然返回 nil
+        s = connect()
+        s.sendall(b"GET no-such-wt\r\n")
+        check("GET missing returns nil", b"$-1\r\n", recv_n(s, 5))
+        s.close()
+                # 9. list 读命令作用在 string key 上 → WRONGTYPE
+        WRONGTYPE = b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+        for cmd in [b"LGET wt:str", b"LLEN wt:str", b"LINDEX wt:str 0"]:
+            s = connect()
+            s.sendall(b"SET wt:str v\r\n")
+            recv_n(s, 5)
+            s.sendall(cmd + b"\r\n")
+            check(f"{cmd.decode()} on string -> WRONGTYPE",
+                  WRONGTYPE, recv_n(s, len(WRONGTYPE)))
+            s.close()
+
+        # 10. 缺失 list 的正常语义
+        s = connect()
+        s.sendall(b"LLEN wt:none\r\n")
+        check("LLEN missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.sendall(b"LGET wt:none\r\n")
+        check("LGET missing -> empty array", b"*0\r\n", recv_n(s, 4))
+        s.sendall(b"LINDEX wt:none 0\r\n")
+        check("LINDEX missing -> nil", b"$-1\r\n", recv_n(s, 5))
+        s.close()
+                # 11. list 写命令作用在 string key 上 → WRONGTYPE
+        write_cmds = [
+            b"LPUSH wt:str a",
+            b"RPUSH wt:str a",
+            b"LPOP wt:str",
+            b"RPOP wt:str",
+            b"LREM wt:str 0 a",
+            b"LSET wt:str 0 a",
+        ]
+        for cmd in write_cmds:
+            s = connect()
+            s.sendall(b"SET wt:str v\r\n")
+            recv_n(s, 5)
+            s.sendall(cmd + b"\r\n")
+            check(f"{cmd.decode()} on string -> WRONGTYPE",
+                  WRONGTYPE, recv_n(s, len(WRONGTYPE)))
+            s.close()
+
+        # 12. 缺失 list 的写命令语义
+        s = connect()
+        s.sendall(b"LPOP wt:none\r\n")
+        check("LPOP missing -> nil", b"$-1\r\n", recv_n(s, 5))
+        s.sendall(b"RPOP wt:none\r\n")
+        check("RPOP missing -> nil", b"$-1\r\n", recv_n(s, 5))
+        s.sendall(b"LREM wt:none 0 a\r\n")
+        check("LREM missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.close()
+                # 13. hash 命令作用在 string key 上 → WRONGTYPE
+        hash_cmds = [
+            b"HSET wt:str f v",
+            b"HMSET wt:str f v",
+            b"HGET wt:str f",
+            b"HEXISTS wt:str f",
+            b"HDEL wt:str f",
+            b"HGETALL wt:str",
+            b"HKEYS wt:str",
+            b"HVALS wt:str",
+            b"HLEN wt:str",
+        ]
+        for cmd in hash_cmds:
+            s = connect()
+            s.sendall(b"SET wt:str v\r\n")
+            recv_n(s, 5)
+            s.sendall(cmd + b"\r\n")
+            check(f"{cmd.decode()} on string -> WRONGTYPE",
+                  WRONGTYPE, recv_n(s, len(WRONGTYPE)))
+            s.close()
+
+        # 14. 缺失 hash 的默认返回
+        s = connect()
+        s.sendall(b"HGET wt:none f\r\n")
+        check("HGET missing -> nil", b"$-1\r\n", recv_n(s, 5))
+        s.sendall(b"HGETALL wt:none\r\n")
+        check("HGETALL missing -> empty array", b"*0\r\n", recv_n(s, 4))
+        s.sendall(b"HLEN wt:none\r\n")
+        check("HLEN missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.sendall(b"HDEL wt:none f\r\n")
+        check("HDEL missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.sendall(b"HEXISTS wt:none f\r\n")
+        check("HEXISTS missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.close()
+              
+
+       
     finally:
         proc.kill()
         proc.wait()

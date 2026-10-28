@@ -36,14 +36,14 @@ public:
     bool rename(const std::string &oldKey, const std::string &newKey);
 
     // List Opreations
-    std::vector<std::string> lget(const std::string &key);
-    ssize_t llen(const std::string &key);
+    Status lget(const std::string &key, std::vector<std::string> &out);
+    Status llen(const std::string &key, ssize_t &out);
     void lpush(const std::string &key, const std::string &value);
     void rpush(const std::string &key, const std::string &value);
     bool lpop(const std::string &key, std::string &value);
     bool rpop(const std::string &key, std::string &value);
     int lrem(const std::string &key, int count, const std::string &value);
-    bool lindex(const std::string &key, int index, std::string &value);
+    Status lindex(const std::string &key, int index, std::string &value);
     bool lset(const std::string &key, int index, const std::string &value);
 
     // Hash Operations

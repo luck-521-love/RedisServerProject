@@ -135,6 +135,26 @@ def main():
         s.sendall(b"GET no-such-wt\r\n")
         check("GET missing returns nil", b"$-1\r\n", recv_n(s, 5))
         s.close()
+                # 9. list 读命令作用在 string key 上 → WRONGTYPE
+        WRONGTYPE = b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+        for cmd in [b"LGET wt:str", b"LLEN wt:str", b"LINDEX wt:str 0"]:
+            s = connect()
+            s.sendall(b"SET wt:str v\r\n")
+            recv_n(s, 5)
+            s.sendall(cmd + b"\r\n")
+            check(f"{cmd.decode()} on string -> WRONGTYPE",
+                  WRONGTYPE, recv_n(s, len(WRONGTYPE)))
+            s.close()
+
+        # 10. 缺失 list 的正常语义
+        s = connect()
+        s.sendall(b"LLEN wt:none\r\n")
+        check("LLEN missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.sendall(b"LGET wt:none\r\n")
+        check("LGET missing -> empty array", b"*0\r\n", recv_n(s, 4))
+        s.sendall(b"LINDEX wt:none 0\r\n")
+        check("LINDEX missing -> nil", b"$-1\r\n", recv_n(s, 5))
+        s.close()
     finally:
         proc.kill()
         proc.wait()

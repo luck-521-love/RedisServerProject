@@ -7,6 +7,8 @@
 #include <exception>
 #include <iostream> // debug
 #include <climits>
+static const char *kErrWrongType =
+    "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 
 static std::string handlePing(const std::vector<std::string> & /*tokens*/, RedisDatabase & /*db*/)
 {
@@ -132,9 +134,15 @@ static std::string handleLget(const std::vector<std::string> &tokens, RedisDatab
 {
     if (tokens.size() < 2)
         return "-Error: LGET requires a key\r\n";
-    auto elems = db.lget(tokens[1]);
+
+    std::vector<std::string> elems;
+    Status st = db.lget(tokens[1], elems);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+
     std::ostringstream oss;
     oss << "*" << elems.size() << "\r\n";
+
     for (const auto &e : elems)
     {
         oss << "$" << e.size() << "\r\n"
@@ -147,7 +155,12 @@ static std::string handleLlen(const std::vector<std::string> &tokens, RedisDatab
 {
     if (tokens.size() < 2)
         return "-Error: LLEN require key\r\n";
-    size_t len = db.llen(tokens[1]);
+
+    ssize_t len = 0;
+    Status st = db.llen(tokens[1], len);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+
     return ":" + std::to_string(len) + "\r\n";
 }
 
@@ -159,7 +172,10 @@ static std::string handleLpush(const std::vector<std::string> &tokens, RedisData
     {
         db.lpush(tokens[1], tokens[i]);
     }
-    size_t len = db.llen(tokens[1]);
+    ssize_t len = 0;
+    Status st = db.llen(tokens[1], len);
+    if (st == Status::WrongType)
+        return kErrWrongType;
     return ":" + std::to_string(len) + "\r\n";
 }
 
@@ -172,7 +188,10 @@ static std::string handleRpush(const std::vector<std::string> &tokens, RedisData
         db.rpush(tokens[1], tokens[i]);
     }
 
-    size_t len = db.llen(tokens[1]);
+    ssize_t len = 0;
+    Status st = db.llen(tokens[1], len);
+    if (st == Status::WrongType)
+        return kErrWrongType;
     return ":" + std::to_string(len) + "\r\n";
 }
 
@@ -216,14 +235,19 @@ static std::string handleLindex(const std::vector<std::string> &tokens, RedisDat
 {
     if (tokens.size() < 3)
         return "-Error: LINDEX requires key and index\r\n";
+
     try
     {
         int index = std::stoi(tokens[2]);
         std::string value;
-        if (db.lindex(tokens[1], index, value))
-            return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-        else
+        Status st = db.lindex(tokens[1], index, value);
+
+        if (st == Status::WrongType)
+            return kErrWrongType;
+        if (st == Status::NotFound)
             return "$-1\r\n";
+
+        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
     }
     catch (const std::exception &)
     {

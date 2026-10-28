@@ -174,7 +174,9 @@ assert_eq "LPUSH ks:1 a" "1" "$(cli LPUSH ks:1 a)"
 assert_eq "SET 覆盖 list" "OK" "$(cli SET ks:1 text)"
 assert_eq "覆盖后 TYPE" "string" "$(cli TYPE ks:1)"
 assert_eq "覆盖后 GET" "text" "$(cli GET ks:1)"
-assert_eq "覆盖后 LLEN 为 0" "0" "$(cli LLEN ks:1)"
+assert_eq "覆盖后 LLEN 应为 WRONGTYPE" \
+  "WRONGTYPE Operation against a key holding the wrong kind of value" \
+  "$(cli LLEN ks:1 2>&1)"
 assert_eq "KEYS 中 ks:1 只出现一次" "1" "$(cli KEYS '*' | grep -c '^ks:1$')"
 
 assert_eq "HSET ks:2 f v" "1" "$(cli HSET ks:2 f v)"

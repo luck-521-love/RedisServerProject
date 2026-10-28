@@ -155,6 +155,33 @@ def main():
         s.sendall(b"LINDEX wt:none 0\r\n")
         check("LINDEX missing -> nil", b"$-1\r\n", recv_n(s, 5))
         s.close()
+                # 11. list 写命令作用在 string key 上 → WRONGTYPE
+        write_cmds = [
+            b"LPUSH wt:str a",
+            b"RPUSH wt:str a",
+            b"LPOP wt:str",
+            b"RPOP wt:str",
+            b"LREM wt:str 0 a",
+            b"LSET wt:str 0 a",
+        ]
+        for cmd in write_cmds:
+            s = connect()
+            s.sendall(b"SET wt:str v\r\n")
+            recv_n(s, 5)
+            s.sendall(cmd + b"\r\n")
+            check(f"{cmd.decode()} on string -> WRONGTYPE",
+                  WRONGTYPE, recv_n(s, len(WRONGTYPE)))
+            s.close()
+
+        # 12. 缺失 list 的写命令语义
+        s = connect()
+        s.sendall(b"LPOP wt:none\r\n")
+        check("LPOP missing -> nil", b"$-1\r\n", recv_n(s, 5))
+        s.sendall(b"RPOP wt:none\r\n")
+        check("RPOP missing -> nil", b"$-1\r\n", recv_n(s, 5))
+        s.sendall(b"LREM wt:none 0 a\r\n")
+        check("LREM missing -> 0", b":0\r\n", recv_n(s, 4))
+        s.close()
     finally:
         proc.kill()
         proc.wait()

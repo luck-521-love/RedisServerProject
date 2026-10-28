@@ -337,55 +337,75 @@ Status RedisDatabase::llen(const std::string &key, ssize_t &out)
     return Status::OK;
 }
 
-void RedisDatabase::lpush(const std::string &key, const std::string &value)
+Status RedisDatabase::lpush(const std::string &key, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
     removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
     list_store[key].insert(list_store[key].begin(), value);
+    return Status::OK;
 }
 
-void RedisDatabase::rpush(const std::string &key, const std::string &value)
+Status RedisDatabase::rpush(const std::string &key, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
     removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
     list_store[key].push_back(value);
+    return Status::OK;
 }
 
-bool RedisDatabase::lpop(const std::string &key, std::string &value)
+Status RedisDatabase::lpop(const std::string &key, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = list_store.find(key);
+    removeIfExpired(key);
 
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = list_store.find(key);
     if (it == list_store.end() || it->second.empty())
-        return false;
+        return Status::NotFound;
 
     value = it->second.front();
     it->second.erase(it->second.begin());
 
-    // 最后一个元素被弹出：删除 Key
     if (it->second.empty())
     {
         list_store.erase(it);
-
         bool stillExists = kv_store.find(key) != kv_store.end() ||
                            hash_store.find(key) != hash_store.end();
+
         if (!stillExists)
             expiry_map.erase(key);
     }
-    return true;
+    return Status::OK;
 }
 
-bool RedisDatabase::rpop(const std::string &key, std::string &value)
+Status RedisDatabase::rpop(const std::string &key, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = list_store.find(key);
+    removeIfExpired(key);
 
+    KeyType t = keyTypeOf(key);
+
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = list_store.find(key);
     if (it == list_store.end() || it->second.empty())
-        return false;
+        return Status::NotFound;
 
     value = it->second.back();
     it->second.pop_back();
@@ -393,25 +413,29 @@ bool RedisDatabase::rpop(const std::string &key, std::string &value)
     if (it->second.empty())
     {
         list_store.erase(it);
-
         bool stillExists = kv_store.find(key) != kv_store.end() ||
                            hash_store.find(key) != hash_store.end();
+
         if (!stillExists)
             expiry_map.erase(key);
     }
-    return true;
+    return Status::OK;
 }
 
-int RedisDatabase::lrem(const std::string &key, int count, const std::string &value)
+Status RedisDatabase::lrem(const std::string &key, int count, const std::string &value, int &removed)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return 0;
-    int removed = 0;
-    auto it = list_store.find(key);
-    if (it == list_store.end())
-        return 0;
+    removeIfExpired(key);
 
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
+
+    removed = 0;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto it = list_store.find(key);
     auto &lst = it->second;
 
     if (count == 0)
@@ -456,7 +480,7 @@ int RedisDatabase::lrem(const std::string &key, int count, const std::string &va
             }
         }
     }
-    if (it->second.empty())
+    if (lst.empty())
     {
         list_store.erase(it);
 
@@ -466,7 +490,7 @@ int RedisDatabase::lrem(const std::string &key, int count, const std::string &va
         if (!stillExists)
             expiry_map.erase(key);
     }
-    return removed;
+    return Status::OK;
 }
 
 Status RedisDatabase::lindex(const std::string &key, int index, std::string &value)
@@ -491,23 +515,30 @@ Status RedisDatabase::lindex(const std::string &key, int index, std::string &val
     return Status::OK;
 }
 
-bool RedisDatabase::lset(const std::string &key, int index, const std::string &value)
+Status RedisDatabase::lset(const std::string &key, int index, const std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    if (removeIfExpired(key))
-        return false;
-    auto it = list_store.find(key);
-    if (it == list_store.end())
-        return false;
+    removeIfExpired(key);
 
-    auto &lst = it->second;
-    if (index < 0)
-        index = it->second.size() + index;
-    if (index < 0 || index >= static_cast<int>(lst.size()))
-        return false;
+    KeyType t = keyTypeOf(key);
+    if (t != KeyType::None && t != KeyType::List)
+        return Status::WrongType;
 
-    lst[index] = value;
-    return true;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    auto &lst = list_store.find(key)->second;
+
+    long long idx = static_cast<long long>(idx);
+
+    if (idx < 0)
+        idx += static_cast<long long>(lst.size());
+    if (idx < 0 || idx >= static_cast<long long>(lst.size()))
+        return Status::NotFound;
+
+    lst[static_cast<size_t>(idx)] = value;
+
+    return Status::OK;
 }
 
 // Hash Operations

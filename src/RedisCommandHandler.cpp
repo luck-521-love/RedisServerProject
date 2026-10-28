@@ -170,7 +170,9 @@ static std::string handleLpush(const std::vector<std::string> &tokens, RedisData
         return "-Error: LPUSH requires key and value\r\n";
     for (size_t i = 2; i < tokens.size(); ++i)
     {
-        db.lpush(tokens[1], tokens[i]);
+        Status st = db.lpush(tokens[1], tokens[i]);
+        if (st == Status::WrongType)
+            return kErrWrongType;
     }
     ssize_t len = 0;
     Status st = db.llen(tokens[1], len);
@@ -185,7 +187,9 @@ static std::string handleRpush(const std::vector<std::string> &tokens, RedisData
         return "-Error: RPUSH requires key and value\r\n";
     for (size_t i = 2; i < tokens.size(); ++i)
     {
-        db.rpush(tokens[1], tokens[i]);
+        Status st = db.rpush(tokens[1], tokens[i]);
+        if (st == Status::WrongType)
+            return kErrWrongType;
     }
 
     ssize_t len = 0;
@@ -200,9 +204,13 @@ static std::string handleLpop(const std::vector<std::string> &tokens, RedisDatab
     if (tokens.size() < 2)
         return "-Error: LPOP requires key\r\n";
     std::string value;
-    if (db.lpop(tokens[1], value))
-        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-    return "$-1\r\n";
+    Status st = db.lpop(tokens[1], value);
+
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return "$-1\r\n";
+    return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
 }
 
 static std::string handleRpop(const std::vector<std::string> &tokens, RedisDatabase &db)
@@ -210,9 +218,12 @@ static std::string handleRpop(const std::vector<std::string> &tokens, RedisDatab
     if (tokens.size() < 2)
         return "-Error: RPOP requires key\r\n";
     std::string value;
-    if (db.rpop(tokens[1], value))
-        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-    return "$-1\r\n";
+    Status st = db.rpop(tokens[1], value);
+    if (st == Status::WrongType)
+        return kErrWrongType;
+    if (st == Status::NotFound)
+        return "$-1\r\n";
+    return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
 }
 
 static std::string handleLrem(const std::vector<std::string> &tokens, RedisDatabase &db)
@@ -222,7 +233,10 @@ static std::string handleLrem(const std::vector<std::string> &tokens, RedisDatab
     try
     {
         int count = std::stoi(tokens[2]);
-        int removed = db.lrem(tokens[1], count, tokens[3]);
+        int removed = 0;
+        Status st = db.lrem(tokens[1], count, tokens[3], removed);
+        if (st == Status::WrongType)
+            return kErrWrongType;
         return ":" + std::to_string(removed) + "\r\n";
     }
     catch (const std::exception &)
@@ -262,10 +276,12 @@ static std::string handleLset(const std::vector<std::string> &tokens, RedisDatab
     try
     {
         int index = std::stoi(tokens[2]);
-        if (db.lset(tokens[1], index, tokens[3]))
-            return "+OK\r\n";
-        else
-            return "-Error: Index out of range\r\n";
+        Status st = db.lset(tokens[1], index, tokens[3]);
+        if (st == Status::WrongType)
+            return kErrWrongType;
+        if (st == Status::NotFound)
+            return "-Error: Key not found or index out of range\r\n";
+        return "+OK\r\n";
     }
     catch (const std::exception &)
     {

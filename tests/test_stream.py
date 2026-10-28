@@ -121,6 +121,20 @@ def main():
         s.sendall(b"PING\r\n")
         check("server alive after malformed", b"+PONG\r\n", recv_n(s, 7))
         s.close()
+         # 7. GET 读错误类型 → WRONGTYPE
+        s = connect()
+        s.sendall(b"LPUSH wt:list a\r\n")
+        check("prepare list for WRONGTYPE", b":1\r\n", recv_n(s, 4))
+        expected = b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+        s.sendall(b"GET wt:list\r\n")
+        check("GET on list returns WRONGTYPE", expected, recv_n(s, len(expected)))
+        s.close()
+
+        # 8. GET 不存在的 key 仍然返回 nil
+        s = connect()
+        s.sendall(b"GET no-such-wt\r\n")
+        check("GET missing returns nil", b"$-1\r\n", recv_n(s, 5))
+        s.close()
     finally:
         proc.kill()
         proc.wait()

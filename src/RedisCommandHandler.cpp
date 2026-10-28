@@ -64,9 +64,13 @@ static std::string handleGet(const std::vector<std::string> &tokens, RedisDataba
     if (tokens.size() < 2)
         return "-Error: GET requires key\r\n";
     std::string value;
-    if (db.get(tokens[1], value))
-        return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-    return "$-1\r\n";
+    Status st = db.get(tokens[1], value);
+
+    if (st == Status::WrongType)
+        return "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
+    if (st == Status::NotFound)
+        return "$-1\r\n";
+    return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
 }
 
 static std::string handleKeys(const std::vector<std::string> & /*tokens*/, RedisDatabase &db)

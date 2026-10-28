@@ -96,6 +96,18 @@ bool RedisDatabase::persist(const std::string &key)
     expiry_map.erase(it);
     return true;
 }
+
+RedisDatabase::KeyType RedisDatabase::keyTypeOf(const std::string &key) const
+{
+    if (kv_store.find(key) != kv_store.end())
+        return KeyType::String;
+    if (list_store.find(key) != list_store.end())
+        return KeyType::List;
+    if (hash_store.find(key) != hash_store.end())
+        return KeyType::Hash;
+    return KeyType::None;
+}
+
 // Key/Value Operations
 void RedisDatabase::set(const std::string &key, const std::string &value)
 {
@@ -108,18 +120,20 @@ void RedisDatabase::set(const std::string &key, const std::string &value)
     return;
 }
 
-bool RedisDatabase::get(const std::string &key, std::string &value)
+Status RedisDatabase::get(const std::string &key, std::string &value)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
-    purgeExpired();
-    auto it = kv_store.find(key);
 
-    if (it != kv_store.end())
-    {
-        value = it->second;
-        return true;
-    }
-    return false;
+    removeIfExpired(key);
+
+    KeyType t = keyTypeOf(key);
+    if (t == KeyType::List || t == KeyType::Hash)
+        return Status::WrongType;
+    if (t == KeyType::None)
+        return Status::NotFound;
+
+    value = kv_store.find(key)->second;
+    return Status::OK;
 }
 
 std::vector<std::string> RedisDatabase::keys()

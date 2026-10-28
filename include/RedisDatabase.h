@@ -7,6 +7,13 @@
 #include <vector>
 #include <chrono>
 
+enum Status
+{
+    OK,
+    WrongType,
+    NotFound
+};
+
 class RedisDatabase
 {
 public:
@@ -20,7 +27,7 @@ public:
     bool persist(const std::string &key);   // 有 TTL 并移除 → true；否则 false
     // Key/Value Operations
     void set(const std::string &key, const std::string &value);
-    bool get(const std::string &key, std::string &value);
+    Status get(const std::string &key, std::string &value);
     std::vector<std::string> keys();
     std::string type(const std::string &key);
     bool del(const std::string &key);
@@ -59,6 +66,15 @@ private:
     ~RedisDatabase() = default;
     RedisDatabase(const RedisDatabase &) = delete;
     RedisDatabase &operator=(const RedisDatabase) = delete;
+
+    enum class KeyType
+    {
+        None,
+        String,
+        List,
+        Hash
+    };
+    KeyType keyTypeOf(const std::string &key) const;
 
     // 调用者必须已持有 db_mutex,RedisDatabase内部辅助函数
     bool removeIfExpired(const std::string &key);

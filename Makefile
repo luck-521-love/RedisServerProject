@@ -6,8 +6,11 @@ BUILD_DIR = build
 
 SRCS := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS := $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(SRCS))
+DEPS := $(OBJS:.o=.d)
 
 TARGET = my_redis_server
+
+.PHONY: all clean rebuild run
 
 all: $(TARGET)
 
@@ -27,3 +30,5 @@ rebuild: clean all
 
 run: all
 	./$(TARGET)
+
+-include $(DEPS)

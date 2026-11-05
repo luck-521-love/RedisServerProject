@@ -7,9 +7,43 @@
 #include <exception>
 #include <iostream> // debug
 #include <climits>
+#include <unistd.h> // getpid()
+
 static const char *kErrWrongType =
     "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 
+static bool globMatch(const std::string &pattern, const std::string &text)
+{
+    size_t p = 0, t = 0;
+    size_t star = std::string::npos;
+    size_t match = 0;
+
+    while (t < text.size())
+    {
+        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == text[t]))
+        {
+            ++p;
+            ++t;
+        }
+        else if (p < pattern.size() && pattern[p] == '*')
+        {
+            star = p++;
+            match = t;
+        }
+        else if (star != std::string::npos)
+        {
+            p = star + 1;
+            t = ++match;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    while (p < pattern.size() && pattern[p] == '*')
+        ++p;
+    return p == pattern.size();
+}
 static std::string handlePing(const std::vector<std::string> & /*tokens*/, RedisDatabase & /*db*/)
 {
     return "+PONG\r\n";
@@ -434,14 +468,94 @@ static std::string handleHmset(const std::vector<std::string> &tokens, RedisData
     return "+OK\r\n";
 }
 
-RedisCommandHandler::RedisCommandHandler() {}
+RedisCommandHandler::RedisCommandHandler(ServerStats *stats, ServerConfig *config) : stats_(stats), config_(config)
+{
+}
+std::string RedisCommandHandler::handleConfig(
+    const std::vector<std::string> &tokens)
+{
+    if (tokens.size() < 3)
+        return "-ERR wrong number of arguments for 'config' command\r\n";
+
+    std::string sub = tokens[1];
+    std::transform(sub.begin(), sub.end(), sub.begin(), ::toupper);
+
+    if (sub == "GET")
+    {
+        if (!config_)
+            return "*0\r\n";
+
+        std::vector<std::pair<std::string, std::string>> matched;
+        for (const auto &kv : config_->values)
+        {
+            if (globMatch(tokens[2], kv.first))
+                matched.emplace_back(kv.first, kv.second);
+        }
+
+        std::sort(matched.begin(), matched.end());
+
+        std::ostringstream oss;
+        oss << "*" << matched.size() * 2 << "\r\n";
+        for (const auto &kv : matched)
+        {
+            oss << "$" << kv.first.size() << "\r\n"
+                << kv.first << "\r\n"
+                << "$" << kv.second.size() << "\r\n"
+                << kv.second << "\r\n";
+        }
+        return oss.str();
+    }
+
+    if (sub == "SET")
+        return "-ERR CONFIG SET is not supported yet\r\n";
+
+    return "-ERR Unknown CONFIG subcommand\r\n";
+}
+
+std::string RedisCommandHandler::handleInfo(
+    const std::vector<std::string> & /*tokens*/)
+{
+    uint64_t uptime = stats_ ? stats_->uptimeSeconds() : 0;
+    int64_t clients = stats_
+                          ? stats_->connected_clients.load(std::memory_order_relaxed)
+                          : 0;
+    uint64_t conns = stats_
+                         ? stats_->total_connections.load(std::memory_order_relaxed)
+                         : 0;
+    uint64_t cmds = stats_
+                        ? stats_->total_commands.load(std::memory_order_relaxed)
+                        : 0;
+
+    std::ostringstream body;
+    body << "# Server\r\n"
+         << "redis_version:0.1.0\r\n"
+         << "redis_mode:standalone\r\n"
+         << "os:Linux\r\n"
+         << "process_id:" << getpid() << "\r\n"
+         << "uptime_in_seconds:" << uptime << "\r\n"
+         << "\r\n"
+         << "# Clients\r\n"
+         << "connected_clients:" << clients << "\r\n"
+         << "\r\n"
+         << "# Stats\r\n"
+         << "total_connections_received:" << conns << "\r\n"
+         << "total_commands_processed:" << cmds << "\r\n"
+         << "\r\n"
+         << "# Persistence\r\n"
+         << "loading:0\r\n";
+
+    std::string s = body.str();
+    return "$" + std::to_string(s.size()) + "\r\n" + s + "\r\n";
+}
 
 std::string RedisCommandHandler::processCommand(const std::vector<std::string> &tokens)
 {
     // Use  RESP parser
-
     if (tokens.empty())
         return "-Error: Empty command\r\n";
+
+    if (stats_)
+        stats_->total_commands.fetch_add(1, std::memory_order_relaxed);
 
     std::string cmd = tokens[0];
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
@@ -459,6 +573,10 @@ std::string RedisCommandHandler::processCommand(const std::vector<std::string> &
         return handlePttl(tokens, db);
     else if (cmd == "PERSIST")
         return handlePersist(tokens, db);
+    else if (cmd == "CONFIG")
+        return handleConfig(tokens);
+    else if (cmd == "INFO")
+        return handleInfo(tokens);
     else if (cmd == "SET")
         return handleSet(tokens, db);
     else if (cmd == "GET")

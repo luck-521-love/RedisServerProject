@@ -216,7 +216,20 @@ def main():
         s.sendall(b"HEXISTS wt:none f\r\n")
         check("HEXISTS missing -> 0", b":0\r\n", recv_n(s, 4))
         s.close()
-              
+                # 15. CONFIG GET
+        s = connect()
+        s.sendall(b"CONFIG GET save\r\n")
+        expected = (b"*2\r\n"
+                    b"$4\r\nsave\r\n"
+                    b"$21\r\n900 1 300 10 60 10000\r\n")
+        check("CONFIG GET save", expected, recv_n(s, len(expected)))
+        s.close()
+
+        # 16. CONFIG GET 未知参数 → 空数组
+        s = connect()
+        s.sendall(b"CONFIG GET no-such-key\r\n")
+        check("CONFIG GET unknown", b"*0\r\n", recv_n(s, 4))
+        s.close()      
 
        
     finally:

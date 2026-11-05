@@ -41,8 +41,20 @@ void RedisServer::setupSignalHandler()
     signal(SIGINT, signalHandler);
 }
 
-RedisServer::RedisServer(int port) : port(port), server_socket(-1), epoll_fd(-1), running(true)
+RedisServer::RedisServer(int port) : port(port), server_socket(-1), epoll_fd(-1), running(true), cmdHandler(&stats, &config)
 {
+    config.values =
+        {
+            {"save", "900 1 300 10 60 10000"},
+            {"appendonly", "no"},
+            {"maxmemory", "0"},
+            {"maxclients", "10000"},
+            {"databases", "16"},
+            {"port", std::to_string(port)},
+            {"bind", "0.0.0.0"},
+            {"timeout", "0"},
+    };
+
     globalServer = this;
     setupSignalHandler();
 }
@@ -80,6 +92,8 @@ void RedisServer::closeConnection(int fd)
     if (it == connections.end())
         return;
 
+    stats.connected_clients.fetch_sub(1, std::memory_order_relaxed);
+
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
     close(fd);
     connections.erase(it);
@@ -109,6 +123,9 @@ void RedisServer::acceptLoop()
             close(client);
             continue;
         }
+
+        stats.total_connections.fetch_add(1, std::memory_order_relaxed);
+        stats.connected_clients.fetch_add(1, std::memory_order_relaxed);
 
         epoll_event ev{};
         ev.events = EPOLLIN;

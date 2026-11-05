@@ -186,7 +186,11 @@ assert_eq "覆盖后 HGETALL 应为 WRONGTYPE" \
   "$(cli HGETALL ks:2 2>&1)"
 assert_eq "覆盖后 TYPE" "string" "$(cli TYPE ks:2)"
 
-
+# CONFIG / INFO
+assert_eq "CONFIG GET save 第一行" "save" "$(cli CONFIG GET save | head -1)"
+assert_eq "CONFIG GET 未知参数返回空" "0" "$(cli CONFIG GET no-such | grep -c .)"
+assert_eq "INFO 包含 redis_version" "1" "$(cli INFO | grep -c '^redis_version:')"
+assert_eq "INFO 包含 connected_clients" "1" "$(cli INFO | grep -c '^connected_clients:')"
 
 echo
 echo "== 结果：PASS=$PASS FAIL=$FAIL =="

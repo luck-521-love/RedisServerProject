@@ -7,6 +7,7 @@
 
 #include "Buffer.h"
 #include "RedisCommandHandler.h"
+#include "ServerStats.h"
 
 class RedisServer
 {
@@ -29,6 +30,10 @@ private:
     int epoll_fd;
     std::atomic<bool> running;
     std::unordered_map<int, Connection> connections;
+
+    // 注意声明顺序：stats/config 必须在 cmdHandler 之前
+    ServerStats stats;
+    ServerConfig config;
     RedisCommandHandler cmdHandler;
 
     void setupSignalHandler();

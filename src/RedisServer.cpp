@@ -27,6 +27,7 @@ void signalHandler(int signum)
     exit(signum);
 }
 
+// 设置非阻塞
 static void setNonBlocking(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -40,8 +41,7 @@ void RedisServer::setupSignalHandler()
     signal(SIGINT, signalHandler);
 }
 
-RedisServer::RedisServer(int port)
-    : port(port), server_socket(-1), epoll_fd(-1), running(true)
+RedisServer::RedisServer(int port) : port(port), server_socket(-1), epoll_fd(-1), running(true)
 {
     globalServer = this;
     setupSignalHandler();
@@ -63,6 +63,7 @@ void RedisServer::shutdown()
     std::cout << "Server Shutdown Complete!\n";
 }
 
+// 更新事件
 void RedisServer::updateEvents(Connection &conn)
 {
     epoll_event ev{};

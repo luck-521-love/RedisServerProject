@@ -7,3 +7,7 @@ build
 my_redis_server
 
 server.log
+
+tmp
+
+__pycache__

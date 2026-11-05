@@ -12,19 +12,19 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-static RedisServer *globalServer = nullptr;
+static volatile sig_atomic_t g_stop = 0;
+static void signalHandler(int /*signum*/)
+{
+    g_stop = 1;
+}
 
 static constexpr int kMaxEvents = 64;
 static constexpr size_t kMaxReadBuffer = 64 * 1024 * 1024;
 
-void signalHandler(int signum)
+void RedisServer::setupSignalHandler()
 {
-    if (globalServer)
-    {
-        std::cout << "\nCaught signal " << signum << ", shutting down...\n";
-        globalServer->shutdown();
-    }
-    exit(signum);
+    signal(SIGINT, signalHandler);
+    signal(SIGTERM, signalHandler);
 }
 
 // 设置非阻塞
@@ -34,11 +34,6 @@ static void setNonBlocking(int fd)
     if (flags == -1)
         return;
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-}
-
-void RedisServer::setupSignalHandler()
-{
-    signal(SIGINT, signalHandler);
 }
 
 RedisServer::RedisServer(int port) : port(port), server_socket(-1), epoll_fd(-1), running(true), cmdHandler(&stats, &config)
@@ -55,7 +50,6 @@ RedisServer::RedisServer(int port) : port(port), server_socket(-1), epoll_fd(-1)
             {"timeout", "0"},
     };
 
-    globalServer = this;
     setupSignalHandler();
 }
 
@@ -298,7 +292,7 @@ void RedisServer::run()
 
     epoll_event events[kMaxEvents];
 
-    while (running)
+    while (running && !g_stop)
     {
         int n = epoll_wait(epoll_fd, events, kMaxEvents, -1);
         if (n < 0)
